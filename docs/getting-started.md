@@ -98,21 +98,11 @@ Add the following under `plugins`:
 !!! warning "Privacy: captureContent"
     When `captureContent` is `false` (default), the plugin does **not** record prompt or completion text in traces. This is important for privacy — LLM conversations may contain sensitive data. Only enable this in development or when you have appropriate data handling in place.
 
-## Step 5: Configure the Systemd Service
+## Step 5: Process Management & Restart
 
-If you run OpenClaw via **systemd** (the default when using `openclaw gateway start`), you need to ensure the plugin can load properly. The plugin is loaded at runtime via [jiti](https://github.com/unjs/jiti), but **code changes require a full process restart** — `SIGUSR1` hot-reload does not clear jiti's module cache.
+The plugin is loaded at runtime via [jiti](https://github.com/unjs/jiti). **Code changes require a full process restart** — `SIGUSR1` hot-reload does not clear jiti's module cache.
 
-### Locate the Service Unit
-
-```bash
-# User-level service (most common)
-cat ~/.config/systemd/user/openclaw-gateway.service
-
-# Or system-level (if installed globally)
-cat /etc/systemd/system/openclaw-gateway.service
-```
-
-### Add the Plugin Load Path
+### Plugin Load Path
 
 Make sure your OpenClaw config (`~/.openclaw/openclaw.json`) includes the plugin path in `plugins.load.paths`:
 
@@ -129,41 +119,70 @@ Make sure your OpenClaw config (`~/.openclaw/openclaw.json`) includes the plugin
 ```
 
 !!! important "Use absolute paths"
-    The systemd service runs with a different working directory than your shell. Always use **absolute paths** for plugin load paths — relative paths will fail silently.
+    When OpenClaw runs as a background service, the working directory differs from your shell. Always use **absolute paths** for plugin load paths — relative paths will fail silently.
 
-### Restart Properly
+### Clearing the jiti Cache
 
-After any plugin code change, you must:
+After any plugin TypeScript change, clear the compilation cache before restarting:
 
-1. **Clear the jiti cache** (TypeScript compilation cache):
+=== "Linux / macOS"
 
     ```bash
     rm -rf /tmp/jiti
     ```
 
-2. **Restart the systemd service** (not just SIGUSR1):
+=== "Windows (PowerShell)"
 
-    ```bash
-    # User-level service
-    systemctl --user restart openclaw-gateway
-
-    # Or system-level
-    sudo systemctl restart openclaw-gateway
+    ```powershell
+    Remove-Item -Recurse -Force "$env:TEMP\jiti" -ErrorAction SilentlyContinue
     ```
 
 !!! warning "SIGUSR1 is NOT enough"
-    `openclaw gateway restart` sends `SIGUSR1` which triggers a soft reload. This does **not** clear Node.js `require.cache` or jiti's compiled module cache. For plugin TypeScript changes to take effect, you must do a full systemd restart.
+    `openclaw gateway restart` sends `SIGUSR1` which triggers a soft reload. This does **not** clear Node.js `require.cache` or jiti's compiled module cache. For plugin TypeScript changes to take effect, you must do a full process restart as described below.
 
-### Environment Variables
+---
 
-If you need to pass environment variables to the gateway (e.g., for debugging), add them to the service unit:
+### Linux (systemd)
+
+OpenClaw installs a **systemd user service** by default when using `openclaw gateway start`.
+
+#### Locate the Service Unit
 
 ```bash
-# Edit the service
-systemctl --user edit openclaw-gateway
+# User-level service (most common)
+cat ~/.config/systemd/user/openclaw-gateway.service
 
-# Add under [Service]:
-# Environment="OTEL_LOG_LEVEL=debug"
+# Or system-level (if installed globally)
+cat /etc/systemd/system/openclaw-gateway.service
+```
+
+#### Restart the Service
+
+```bash
+# Clear jiti cache first
+rm -rf /tmp/jiti
+
+# User-level service
+systemctl --user restart openclaw-gateway
+
+# Or system-level
+sudo systemctl restart openclaw-gateway
+```
+
+#### Add Environment Variables
+
+To pass environment variables to the gateway (e.g., for debugging):
+
+```bash
+# Edit the service override
+systemctl --user edit openclaw-gateway
+```
+
+Add under `[Service]`:
+
+```ini
+[Service]
+Environment="OTEL_LOG_LEVEL=debug"
 ```
 
 Then reload and restart:
@@ -173,7 +192,7 @@ systemctl --user daemon-reload
 systemctl --user restart openclaw-gateway
 ```
 
-### Verify the Service is Running
+#### Verify
 
 ```bash
 # Check status
@@ -183,7 +202,146 @@ systemctl --user status openclaw-gateway
 journalctl --user -u openclaw-gateway --since "2 min ago" | grep "\[otel\]"
 ```
 
-You should see:
+---
+
+### macOS (launchd)
+
+On macOS, OpenClaw may run as a **launchd user agent**. If you started it with `openclaw gateway start`, check for a plist file:
+
+#### Locate the Launch Agent
+
+```bash
+# Check for OpenClaw plist
+ls ~/Library/LaunchAgents/ | grep -i openclaw
+
+# View the plist
+cat ~/Library/LaunchAgents/com.openclaw.gateway.plist
+```
+
+#### Restart the Service
+
+```bash
+# Clear jiti cache
+rm -rf /tmp/jiti
+
+# Unload and reload the launch agent
+launchctl unload ~/Library/LaunchAgents/com.openclaw.gateway.plist
+launchctl load ~/Library/LaunchAgents/com.openclaw.gateway.plist
+```
+
+Or if using a newer macOS with `launchctl bootstrap`:
+
+```bash
+rm -rf /tmp/jiti
+launchctl kickstart -k gui/$(id -u)/com.openclaw.gateway
+```
+
+#### Add Environment Variables
+
+Edit the plist file to add environment variables:
+
+```bash
+# Open in your editor
+nano ~/Library/LaunchAgents/com.openclaw.gateway.plist
+```
+
+Add inside the top-level `<dict>`:
+
+```xml
+<key>EnvironmentVariables</key>
+<dict>
+    <key>OTEL_LOG_LEVEL</key>
+    <string>debug</string>
+</dict>
+```
+
+Then reload the agent.
+
+#### Verify
+
+```bash
+# Check if running
+launchctl list | grep openclaw
+
+# Check logs (location depends on plist config)
+tail -f /tmp/openclaw/openclaw-$(date +%Y-%m-%d).log | grep "\[otel\]"
+
+# Or if stdout/stderr are redirected in the plist:
+tail -f ~/Library/Logs/openclaw-gateway.log
+```
+
+---
+
+### Windows
+
+On Windows, OpenClaw may run as a background process or a Windows Service.
+
+#### Running in the Foreground (PowerShell)
+
+The simplest approach — run directly in a terminal:
+
+```powershell
+# Clear jiti cache
+Remove-Item -Recurse -Force "$env:TEMP\jiti" -ErrorAction SilentlyContinue
+
+# Start the gateway
+openclaw gateway --port 18789
+```
+
+To set environment variables:
+
+```powershell
+$env:OTEL_LOG_LEVEL = "debug"
+openclaw gateway --port 18789
+```
+
+#### Running as a Windows Service (NSSM)
+
+If you've set up OpenClaw as a Windows Service using [NSSM](https://nssm.cc/) or similar:
+
+```powershell
+# Clear jiti cache
+Remove-Item -Recurse -Force "$env:TEMP\jiti" -ErrorAction SilentlyContinue
+
+# Restart the service
+nssm restart openclaw-gateway
+
+# Or via native service management
+Restart-Service openclaw-gateway
+```
+
+#### Add Environment Variables (NSSM)
+
+```powershell
+nssm set openclaw-gateway AppEnvironmentExtra "OTEL_LOG_LEVEL=debug"
+nssm restart openclaw-gateway
+```
+
+#### Running as a Scheduled Task
+
+Alternatively, use Task Scheduler to start OpenClaw at login:
+
+1. Open **Task Scheduler** → Create Task
+2. **Trigger:** At log on
+3. **Action:** Start a program
+    - Program: `node`
+    - Arguments: `C:\Users\<you>\AppData\Roaming\npm\node_modules\openclaw\dist\index.js gateway --port 18789`
+4. **Settings:** Do not stop the task if it runs longer than...
+
+To restart: stop the task and start it again.
+
+#### Verify
+
+```powershell
+# Check the gateway log
+Get-Content -Tail 20 "$env:TEMP\openclaw\openclaw-$(Get-Date -Format yyyy-MM-dd).log" | Select-String "\[otel\]"
+```
+
+---
+
+### All Platforms: Expected Output
+
+After a successful restart, you should see these log lines:
 
 ```
 [otel] Starting OpenTelemetry observability...
@@ -198,9 +356,13 @@ You should see:
 
 ## Step 6: Restart the Gateway
 
-If you're **not** using systemd (e.g., running `openclaw gateway` directly in a terminal):
+If you're running OpenClaw **directly in a terminal** (not as a service):
 
 ```bash
+# Clear jiti cache first
+rm -rf /tmp/jiti   # Linux/macOS
+
+# Then restart
 openclaw gateway restart
 ```
 
