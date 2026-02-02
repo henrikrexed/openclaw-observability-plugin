@@ -98,13 +98,113 @@ Add the following under `plugins`:
 !!! warning "Privacy: captureContent"
     When `captureContent` is `false` (default), the plugin does **not** record prompt or completion text in traces. This is important for privacy — LLM conversations may contain sensitive data. Only enable this in development or when you have appropriate data handling in place.
 
-## Step 5: Restart the Gateway
+## Step 5: Configure the Systemd Service
+
+If you run OpenClaw via **systemd** (the default when using `openclaw gateway start`), you need to ensure the plugin can load properly. The plugin is loaded at runtime via [jiti](https://github.com/unjs/jiti), but **code changes require a full process restart** — `SIGUSR1` hot-reload does not clear jiti's module cache.
+
+### Locate the Service Unit
+
+```bash
+# User-level service (most common)
+cat ~/.config/systemd/user/openclaw-gateway.service
+
+# Or system-level (if installed globally)
+cat /etc/systemd/system/openclaw-gateway.service
+```
+
+### Add the Plugin Load Path
+
+Make sure your OpenClaw config (`~/.openclaw/openclaw.json`) includes the plugin path in `plugins.load.paths`:
+
+```json
+{
+  "plugins": {
+    "load": {
+      "paths": [
+        "/absolute/path/to/openclaw-observability-plugin"
+      ]
+    }
+  }
+}
+```
+
+!!! important "Use absolute paths"
+    The systemd service runs with a different working directory than your shell. Always use **absolute paths** for plugin load paths — relative paths will fail silently.
+
+### Restart Properly
+
+After any plugin code change, you must:
+
+1. **Clear the jiti cache** (TypeScript compilation cache):
+
+    ```bash
+    rm -rf /tmp/jiti
+    ```
+
+2. **Restart the systemd service** (not just SIGUSR1):
+
+    ```bash
+    # User-level service
+    systemctl --user restart openclaw-gateway
+
+    # Or system-level
+    sudo systemctl restart openclaw-gateway
+    ```
+
+!!! warning "SIGUSR1 is NOT enough"
+    `openclaw gateway restart` sends `SIGUSR1` which triggers a soft reload. This does **not** clear Node.js `require.cache` or jiti's compiled module cache. For plugin TypeScript changes to take effect, you must do a full systemd restart.
+
+### Environment Variables
+
+If you need to pass environment variables to the gateway (e.g., for debugging), add them to the service unit:
+
+```bash
+# Edit the service
+systemctl --user edit openclaw-gateway
+
+# Add under [Service]:
+# Environment="OTEL_LOG_LEVEL=debug"
+```
+
+Then reload and restart:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user restart openclaw-gateway
+```
+
+### Verify the Service is Running
+
+```bash
+# Check status
+systemctl --user status openclaw-gateway
+
+# Check logs for [otel] messages
+journalctl --user -u openclaw-gateway --since "2 min ago" | grep "\[otel\]"
+```
+
+You should see:
+
+```
+[otel] Starting OpenTelemetry observability...
+[otel] Trace exporter → http://localhost:4318/v1/traces (http)
+[otel] Metrics exporter → http://localhost:4318/v1/metrics (http, interval=30000ms)
+[otel] Registered message_received hook (via api.on)
+[otel] Registered before_agent_start hook (via api.on)
+[otel] Registered tool_result_persist hook (via api.on)
+[otel] Registered agent_end hook (via api.on)
+[otel] ✅ Observability pipeline active
+```
+
+## Step 6: Restart the Gateway
+
+If you're **not** using systemd (e.g., running `openclaw gateway` directly in a terminal):
 
 ```bash
 openclaw gateway restart
 ```
 
-## Step 6: Verify
+## Step 7: Verify
 
 Check that the plugin is running:
 
@@ -135,7 +235,7 @@ You can also check from within a conversation using the agent tool:
 
 The agent will call the `otel_status` tool and report the plugin state.
 
-## Step 7: Send Some Messages
+## Step 8: Send Some Messages
 
 Now just use your OpenClaw agent normally. Every LLM call, tool execution, and command will be traced and metricked automatically.
 
