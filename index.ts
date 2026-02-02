@@ -30,7 +30,7 @@
 import { parseConfig, type OtelObservabilityConfig } from "./src/config.js";
 import { initTelemetry, type TelemetryRuntime } from "./src/telemetry.js";
 import { initOpenLLMetry } from "./src/openllmetry.js";
-import { registerHooks, createCommandHookHandler } from "./src/hooks.js";
+import { registerHooks } from "./src/hooks.js";
 
 const otelObservabilityPlugin = {
   id: "otel-observability",
@@ -101,13 +101,16 @@ const otelObservabilityPlugin = {
       start: async () => {
         logger.info("[otel] Starting OpenTelemetry observability...");
 
-        // 1. Initialize OpenLLMetry (auto-instruments LLM SDK calls)
+        // 1. Initialize our OTel providers FIRST (traces + metrics)
+        //    This registers our TracerProvider as global, so all spans
+        //    (including GenAI wraps) export through our pipeline.
+        telemetry = initTelemetry(config, logger);
+
+        // 2. Wrap LLM SDKs AFTER provider is registered
+        //    The wraps use trace.getTracer() which goes through our provider.
         if (config.traces) {
           await initOpenLLMetry(config, logger);
         }
-
-        // 2. Initialize our own OTel providers (traces + metrics)
-        telemetry = initTelemetry(config, logger);
 
         // 3. Register hooks for tool results and command events
         registerHooks(api, telemetry, config);

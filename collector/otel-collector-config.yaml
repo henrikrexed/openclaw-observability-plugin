@@ -71,8 +71,8 @@ exporters:
 
   # ── Debug exporter (logs to stdout — useful for development) ──────
   debug:
-    verbosity: basic
-    sampling_initial: 5
+    verbosity: detailed
+    sampling_initial: 50
     sampling_thereafter: 200
 
   # ── (Optional) OTLP to another backend ────────────────────────────
