@@ -1,18 +1,42 @@
 /**
  * OpenClaw event hooks — captures tool executions, agent turns, messages,
- * session events, and gateway lifecycle as OTel spans + metrics.
+ * and gateway lifecycle as connected OTel traces.
+ *
+ * Trace structure per request:
+ *   openclaw.request (root span, covers full message → reply lifecycle)
+ *   ├── openclaw.agent.turn (agent processing span)
+ *   │   ├── tool.exec (tool call)
+ *   │   ├── tool.Read (tool call)
+ *   │   ├── anthropic.chat (auto-instrumented by OpenLLMetry)
+ *   │   └── tool.write (tool call)
+ *   └── (future: message.sent span)
+ *
+ * Context propagation:
+ *   - message_received: creates root span, stores in sessionContextMap
+ *   - before_agent_start: creates child "agent turn" span under root
+ *   - tool_result_persist: creates child tool span under agent turn
+ *   - agent_end: ends the agent turn span
  *
  * IMPORTANT: OpenClaw has TWO hook registration systems:
- *   - api.registerHook(events, handler, opts)  → event-stream hooks (command:new, gateway:startup, etc.)
- *   - api.on(hookName, handler, opts)          → typed plugin hooks (tool_result_persist, agent_end, etc.)
- *
- * The typed hook runner (runToolResultPersist, runAgentEnd, etc.) queries registry.typedHooks,
- * which is ONLY populated by api.on(). Using api.registerHook() for typed hooks silently fails.
+ *   - api.registerHook() → event-stream hooks (command:new, gateway:startup)
+ *   - api.on()           → typed plugin hooks (tool_result_persist, agent_end)
  */
 
-import { SpanKind, SpanStatusCode, context, trace } from "@opentelemetry/api";
+import { SpanKind, SpanStatusCode, context, trace, type Span, type Context } from "@opentelemetry/api";
 import type { TelemetryRuntime } from "./telemetry.js";
 import type { OtelObservabilityConfig } from "./config.js";
+
+/** Active trace context for a session — allows connecting spans into one trace. */
+interface SessionTraceContext {
+  rootSpan: Span;
+  rootContext: Context;
+  agentSpan?: Span;
+  agentContext?: Context;
+  startTime: number;
+}
+
+/** Map of sessionKey → active trace context. Cleaned up on agent_end. */
+const sessionContextMap = new Map<string, SessionTraceContext>();
 
 /**
  * Register all plugin hooks on the OpenClaw plugin API.
@@ -27,14 +51,111 @@ export function registerHooks(
 
   // ═══════════════════════════════════════════════════════════════════
   // TYPED HOOKS — registered via api.on() into registry.typedHooks
-  // These are dispatched by the hook runner (runToolResultPersist, etc.)
   // ═══════════════════════════════════════════════════════════════════
 
+  // ── message_received ─────────────────────────────────────────────
+  // Creates the ROOT span for the entire request lifecycle.
+  // All subsequent spans (agent, tools) become children of this span.
+
+  api.on(
+    "message_received",
+    async (event: any, ctx: any) => {
+      try {
+        const channel = event?.channel || "unknown";
+        const sessionKey = event?.sessionKey || ctx?.sessionKey || "unknown";
+        const from = event?.from || event?.senderId || "unknown";
+
+        // Create root span for this request
+        const rootSpan = tracer.startSpan("openclaw.request", {
+          kind: SpanKind.SERVER,
+          attributes: {
+            "openclaw.message.channel": channel,
+            "openclaw.session.key": sessionKey,
+            "openclaw.message.direction": "inbound",
+            "openclaw.message.from": from,
+          },
+        });
+
+        // Store the context so child spans can reference it
+        const rootContext = trace.setSpan(context.active(), rootSpan);
+
+        sessionContextMap.set(sessionKey, {
+          rootSpan,
+          rootContext,
+          startTime: Date.now(),
+        });
+
+        logger.debug?.(`[otel] Root span started for session=${sessionKey}`);
+      } catch {
+        // Never let telemetry errors break the main flow
+      }
+    },
+    { priority: 100 } // High priority — run first to establish context
+  );
+
+  logger.info("[otel] Registered message_received hook (via api.on)");
+
+  // ── before_agent_start ───────────────────────────────────────────
+  // Creates an "agent turn" child span under the root request span.
+
+  api.on(
+    "before_agent_start",
+    (event: any, ctx: any) => {
+      try {
+        const sessionKey = event?.sessionKey || ctx?.sessionKey || "unknown";
+        const agentId = event?.agentId || ctx?.agentId || "unknown";
+        const model = event?.model || "unknown";
+
+        const sessionCtx = sessionContextMap.get(sessionKey);
+        const parentContext = sessionCtx?.rootContext || context.active();
+
+        // Create agent turn span as child of root span
+        const agentSpan = tracer.startSpan(
+          "openclaw.agent.turn",
+          {
+            kind: SpanKind.INTERNAL,
+            attributes: {
+              "openclaw.agent.id": agentId,
+              "openclaw.session.key": sessionKey,
+              "openclaw.agent.model": model,
+            },
+          },
+          parentContext
+        );
+
+        const agentContext = trace.setSpan(parentContext, agentSpan);
+
+        // Store agent span context for tool spans
+        if (sessionCtx) {
+          sessionCtx.agentSpan = agentSpan;
+          sessionCtx.agentContext = agentContext;
+        } else {
+          // No root span (e.g., heartbeat) — create a standalone context
+          sessionContextMap.set(sessionKey, {
+            rootSpan: agentSpan,
+            rootContext: agentContext,
+            agentSpan,
+            agentContext,
+            startTime: Date.now(),
+          });
+        }
+
+        logger.debug?.(`[otel] Agent turn span started: agent=${agentId}, session=${sessionKey}`);
+      } catch {
+        // Silently ignore
+      }
+
+      // Return undefined — don't modify system prompt
+      return undefined;
+    },
+    { priority: 90 }
+  );
+
+  logger.info("[otel] Registered before_agent_start hook (via api.on)");
+
   // ── tool_result_persist ──────────────────────────────────────────
-  // Fires synchronously before a tool result is written to the transcript.
-  // Receives: (event: { toolName, toolCallId, message, isSynthetic },
-  //            ctx: { agentId, sessionKey, toolName, toolCallId })
-  // Must be SYNCHRONOUS. Return { message } to modify, or undefined to keep as-is.
+  // Creates a child span under the agent turn span for each tool call.
+  // SYNCHRONOUS — must not return a Promise.
 
   api.on(
     "tool_result_persist",
@@ -52,33 +173,39 @@ export function registerHooks(
           "session.key": sessionKey,
         });
 
-        // Create a span for the tool execution
-        const span = tracer.startSpan(`tool.${toolName}`, {
-          kind: SpanKind.INTERNAL,
-          attributes: {
-            "openclaw.tool.name": toolName,
-            "openclaw.tool.call_id": toolCallId,
-            "openclaw.tool.is_synthetic": isSynthetic,
-            "openclaw.session.key": sessionKey,
-            "openclaw.agent.id": agentId,
+        // Get parent context — prefer agent turn span, fall back to root
+        const sessionCtx = sessionContextMap.get(sessionKey);
+        const parentContext = sessionCtx?.agentContext || sessionCtx?.rootContext || context.active();
+
+        // Create tool span as child of agent turn
+        const span = tracer.startSpan(
+          `tool.${toolName}`,
+          {
+            kind: SpanKind.INTERNAL,
+            attributes: {
+              "openclaw.tool.name": toolName,
+              "openclaw.tool.call_id": toolCallId,
+              "openclaw.tool.is_synthetic": isSynthetic,
+              "openclaw.session.key": sessionKey,
+              "openclaw.agent.id": agentId,
+            },
           },
-        });
+          parentContext
+        );
 
         // Inspect the message for result metadata
         const message = event?.message;
         if (message) {
-          // Check for content array (standard tool result format)
-          const content = message?.content;
-          if (content && Array.isArray(content)) {
-            const textParts = content
+          const contentArray = message?.content;
+          if (contentArray && Array.isArray(contentArray)) {
+            const textParts = contentArray
               .filter((c: any) => c.type === "text")
               .map((c: any) => String(c.text || ""));
             const totalChars = textParts.reduce((sum: number, t: string) => sum + t.length, 0);
             span.setAttribute("openclaw.tool.result_chars", totalChars);
-            span.setAttribute("openclaw.tool.result_parts", content.length);
+            span.setAttribute("openclaw.tool.result_parts", contentArray.length);
           }
 
-          // Check for error in content
           if (message?.is_error === true || message?.isError === true) {
             counters.toolErrors.add(1, { "tool.name": toolName });
             span.setStatus({ code: SpanStatusCode.ERROR, message: "Tool execution error" });
@@ -90,8 +217,6 @@ export function registerHooks(
         }
 
         span.end();
-
-        logger.debug?.(`[otel] tool_result_persist span: tool.${toolName} (session=${sessionKey})`);
       } catch {
         // Never let telemetry errors break the main flow
       }
@@ -99,55 +224,13 @@ export function registerHooks(
       // Return undefined to keep the tool result unchanged
       return undefined;
     },
-    { priority: -100 } // Low priority — run after other plugins that might modify the result
+    { priority: -100 }
   );
 
   logger.info("[otel] Registered tool_result_persist hook (via api.on)");
 
-  // ── before_agent_start ───────────────────────────────────────────
-  // Fires before the agent processes a turn. Can inject systemPrompt/prependContext.
-  // We just observe — return undefined to not modify anything.
-
-  api.on(
-    "before_agent_start",
-    (event: any, ctx: any) => {
-      try {
-        const sessionKey = event?.sessionKey || ctx?.sessionKey || "unknown";
-        const agentId = event?.agentId || ctx?.agentId || "unknown";
-        const model = event?.model || "unknown";
-
-        const span = tracer.startSpan("openclaw.agent.start", {
-          kind: SpanKind.INTERNAL,
-          attributes: {
-            "openclaw.agent.id": agentId,
-            "openclaw.session.key": sessionKey,
-            "openclaw.agent.model": model,
-          },
-        });
-
-        counters.sessionResets.add(1, {
-          "agent.id": agentId,
-          "event.type": "agent_start",
-        });
-
-        span.setStatus({ code: SpanStatusCode.OK });
-        span.end();
-
-        logger.debug?.(`[otel] before_agent_start span: agent=${agentId}, session=${sessionKey}`);
-      } catch {
-        // Silently ignore
-      }
-
-      // Return undefined — don't modify system prompt
-      return undefined;
-    },
-    { priority: -100 }
-  );
-
-  logger.info("[otel] Registered before_agent_start hook (via api.on)");
-
   // ── agent_end ────────────────────────────────────────────────────
-  // Fires after the agent finishes processing a turn (void/fire-and-forget).
+  // Ends the agent turn span AND the root request span.
 
   api.on(
     "agent_end",
@@ -155,44 +238,52 @@ export function registerHooks(
       try {
         const sessionKey = event?.sessionKey || ctx?.sessionKey || "unknown";
         const agentId = event?.agentId || ctx?.agentId || "unknown";
-        const model = event?.model || "unknown";
         const durationMs = event?.durationMs;
         const tokenUsage = event?.usage || event?.tokenUsage;
 
-        const span = tracer.startSpan("openclaw.agent.end", {
-          kind: SpanKind.INTERNAL,
-          attributes: {
-            "openclaw.agent.id": agentId,
-            "openclaw.session.key": sessionKey,
-            "openclaw.agent.model": model,
-          },
-        });
+        const sessionCtx = sessionContextMap.get(sessionKey);
 
-        if (typeof durationMs === "number") {
-          span.setAttribute("openclaw.agent.duration_ms", durationMs);
-          histograms.toolDuration.record(durationMs, {
-            "agent.id": agentId,
-            "event.type": "agent_turn",
-          });
+        // End the agent turn span
+        if (sessionCtx?.agentSpan) {
+          const agentSpan = sessionCtx.agentSpan;
+
+          if (typeof durationMs === "number") {
+            agentSpan.setAttribute("openclaw.agent.duration_ms", durationMs);
+            histograms.toolDuration.record(durationMs, {
+              "agent.id": agentId,
+              "event.type": "agent_turn",
+            });
+          }
+
+          // Token usage if available
+          if (tokenUsage) {
+            if (typeof tokenUsage.inputTokens === "number") {
+              agentSpan.setAttribute("gen_ai.usage.input_tokens", tokenUsage.inputTokens);
+            }
+            if (typeof tokenUsage.outputTokens === "number") {
+              agentSpan.setAttribute("gen_ai.usage.output_tokens", tokenUsage.outputTokens);
+            }
+            if (typeof tokenUsage.totalTokens === "number") {
+              agentSpan.setAttribute("gen_ai.usage.total_tokens", tokenUsage.totalTokens);
+            }
+          }
+
+          agentSpan.setStatus({ code: SpanStatusCode.OK });
+          agentSpan.end();
         }
 
-        // Token usage if available
-        if (tokenUsage) {
-          if (typeof tokenUsage.inputTokens === "number") {
-            span.setAttribute("openclaw.agent.input_tokens", tokenUsage.inputTokens);
-          }
-          if (typeof tokenUsage.outputTokens === "number") {
-            span.setAttribute("openclaw.agent.output_tokens", tokenUsage.outputTokens);
-          }
-          if (typeof tokenUsage.totalTokens === "number") {
-            span.setAttribute("openclaw.agent.total_tokens", tokenUsage.totalTokens);
-          }
+        // End the root request span
+        if (sessionCtx?.rootSpan && sessionCtx.rootSpan !== sessionCtx.agentSpan) {
+          const totalMs = Date.now() - sessionCtx.startTime;
+          sessionCtx.rootSpan.setAttribute("openclaw.request.duration_ms", totalMs);
+          sessionCtx.rootSpan.setStatus({ code: SpanStatusCode.OK });
+          sessionCtx.rootSpan.end();
         }
 
-        span.setStatus({ code: SpanStatusCode.OK });
-        span.end();
+        // Clean up
+        sessionContextMap.delete(sessionKey);
 
-        logger.debug?.(`[otel] agent_end span: agent=${agentId}, session=${sessionKey}`);
+        logger.debug?.(`[otel] Trace completed for session=${sessionKey}`);
       } catch {
         // Silently ignore
       }
@@ -202,61 +293,35 @@ export function registerHooks(
 
   logger.info("[otel] Registered agent_end hook (via api.on)");
 
-  // ── message_received ─────────────────────────────────────────────
-  // Fires when an inbound message is received (void/fire-and-forget).
-
-  api.on(
-    "message_received",
-    async (event: any, ctx: any) => {
-      try {
-        const channel = event?.channel || "unknown";
-        const sessionKey = event?.sessionKey || ctx?.sessionKey || "unknown";
-        const from = event?.from || event?.senderId || "unknown";
-
-        const span = tracer.startSpan("openclaw.message.received", {
-          kind: SpanKind.CONSUMER,
-          attributes: {
-            "openclaw.message.channel": channel,
-            "openclaw.session.key": sessionKey,
-            "openclaw.message.direction": "inbound",
-            "openclaw.message.from": from,
-          },
-        });
-
-        span.setStatus({ code: SpanStatusCode.OK });
-        span.end();
-
-        logger.debug?.(`[otel] message_received span: channel=${channel}, session=${sessionKey}`);
-      } catch {
-        // Silently ignore
-      }
-    },
-    { priority: -100 }
-  );
-
-  logger.info("[otel] Registered message_received hook (via api.on)");
-
   // ═══════════════════════════════════════════════════════════════════
   // EVENT-STREAM HOOKS — registered via api.registerHook()
-  // These are dispatched by the internal hooks / event-stream system
   // ═══════════════════════════════════════════════════════════════════
 
   // ── Command event hooks ──────────────────────────────────────────
-  // Track /new, /reset, /stop commands
 
   api.registerHook(
     ["command:new", "command:reset", "command:stop"],
     async (event: any) => {
       try {
         const action = event?.action || "unknown";
-        const span = tracer.startSpan(`openclaw.command.${action}`, {
-          kind: SpanKind.INTERNAL,
-          attributes: {
-            "openclaw.command.action": action,
-            "openclaw.command.session_key": event?.sessionKey || "unknown",
-            "openclaw.command.source": event?.context?.commandSource || "unknown",
+        const sessionKey = event?.sessionKey || "unknown";
+
+        // Get parent context if available
+        const sessionCtx = sessionContextMap.get(sessionKey);
+        const parentContext = sessionCtx?.rootContext || context.active();
+
+        const span = tracer.startSpan(
+          `openclaw.command.${action}`,
+          {
+            kind: SpanKind.INTERNAL,
+            attributes: {
+              "openclaw.command.action": action,
+              "openclaw.command.session_key": sessionKey,
+              "openclaw.command.source": event?.context?.commandSource || "unknown",
+            },
           },
-        });
+          parentContext
+        );
 
         if (action === "new" || action === "reset") {
           counters.sessionResets.add(1, {
@@ -304,4 +369,21 @@ export function registerHooks(
   );
 
   logger.info("[otel] Registered gateway:startup hook (via api.registerHook)");
+
+  // ── Periodic cleanup ─────────────────────────────────────────────
+  // Safety net: clean up stale session contexts (e.g., if agent_end never fires)
+  setInterval(() => {
+    const now = Date.now();
+    const maxAge = 5 * 60 * 1000; // 5 minutes
+    for (const [key, ctx] of sessionContextMap) {
+      if (now - ctx.startTime > maxAge) {
+        try {
+          ctx.agentSpan?.end();
+          if (ctx.rootSpan !== ctx.agentSpan) ctx.rootSpan?.end();
+        } catch { /* ignore */ }
+        sessionContextMap.delete(key);
+        logger.debug?.(`[otel] Cleaned up stale trace context for session=${key}`);
+      }
+    }
+  }, 60_000);
 }
