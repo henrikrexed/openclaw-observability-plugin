@@ -30,8 +30,10 @@ export async function initOpenLLMetry(config: OtelObservabilityConfig, logger: a
 
   // ── Anthropic SDK (ESM) ───────────────────────────────────────────
   try {
-    // MUST use dynamic import() to get the same module instance as pi-ai
-    const sdk = await import("@anthropic-ai/sdk");
+    // MUST use dynamic import() with absolute ESM path to get the same
+    // module instance that pi-ai loaded via `import Anthropic from "@anthropic-ai/sdk"`
+    const SDK_ESM_PATH = "/home/hrexed/.npm-global/lib/node_modules/openclaw/node_modules/@anthropic-ai/sdk/index.mjs";
+    const sdk = await import(SDK_ESM_PATH);
     const Anthropic = sdk.Anthropic || sdk.default;
 
     if (!Anthropic?.Messages?.prototype) {
@@ -179,7 +181,8 @@ export async function initOpenLLMetry(config: OtelObservabilityConfig, logger: a
 
   // ── OpenAI SDK (ESM) ─────────────────────────────────────────────
   try {
-    const sdk = await import("openai");
+    const OPENAI_ESM_PATH = "/home/hrexed/.npm-global/lib/node_modules/openclaw/node_modules/openai/index.mjs";
+    const sdk = await import(OPENAI_ESM_PATH);
     const OpenAI = sdk.OpenAI || sdk.default;
 
     if (OpenAI?.Chat?.Completions?.prototype?.create) {
@@ -232,7 +235,8 @@ export async function initOpenLLMetry(config: OtelObservabilityConfig, logger: a
 
   // ── Bedrock SDK ───────────────────────────────────────────────────
   try {
-    const sdk = await import("@aws-sdk/client-bedrock-runtime");
+    const BEDROCK_ESM_PATH = "/home/hrexed/.npm-global/lib/node_modules/openclaw/node_modules/@aws-sdk/client-bedrock-runtime/dist-es/index.js";
+    const sdk = await import(BEDROCK_ESM_PATH);
     if (sdk?.BedrockRuntimeClient?.prototype?.send) {
       const origSend = sdk.BedrockRuntimeClient.prototype.send;
 
