@@ -85,6 +85,11 @@ export function registerHooks(
           startTime: Date.now(),
         });
 
+        // Record message count metric
+        counters.messagesReceived.add(1, {
+          "openclaw.message.channel": channel,
+        });
+
         logger.debug?.(`[otel] Root span started for session=${sessionKey}`);
       } catch {
         // Never let telemetry errors break the main flow
@@ -281,12 +286,32 @@ export function registerHooks(
             });
           }
 
-          // Token usage from messages
+          // Token usage from messages — both as span attributes AND metrics
           agentSpan.setAttribute("gen_ai.usage.input_tokens", totalInputTokens);
           agentSpan.setAttribute("gen_ai.usage.output_tokens", totalOutputTokens);
           agentSpan.setAttribute("gen_ai.usage.total_tokens", totalInputTokens + totalOutputTokens);
           agentSpan.setAttribute("gen_ai.response.model", model);
           agentSpan.setAttribute("openclaw.agent.success", success);
+
+          // Record token consumption metrics (cumulative counters)
+          if (totalInputTokens > 0 || totalOutputTokens > 0) {
+            const metricAttrs = {
+              "gen_ai.response.model": model,
+              "openclaw.agent.id": agentId,
+            };
+            counters.tokensPrompt.add(totalInputTokens, metricAttrs);
+            counters.tokensCompletion.add(totalOutputTokens, metricAttrs);
+            counters.tokensTotal.add(totalInputTokens + totalOutputTokens, metricAttrs);
+            counters.llmRequests.add(1, metricAttrs);
+          }
+
+          // Record duration histogram
+          if (typeof durationMs === "number") {
+            histograms.agentTurnDuration.record(durationMs, {
+              "gen_ai.response.model": model,
+              "openclaw.agent.id": agentId,
+            });
+          }
 
           if (errorMsg) {
             agentSpan.setAttribute("openclaw.agent.error", String(errorMsg).slice(0, 500));
