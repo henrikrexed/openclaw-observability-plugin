@@ -1,0 +1,32 @@
+# Docker Compose for local OpenTelemetry Collector
+#
+# Usage:
+#   export DYNATRACE_ENDPOINT=https://<YOUR_ENV>.live.dynatrace.com/api/v2/otlp
+#   export DYNATRACE_API_TOKEN=<YOUR_ACCESS_TOKEN>
+#   docker compose up -d
+#
+# The collector listens on:
+#   - OTLP/gRPC: localhost:4317
+#   - OTLP/HTTP: localhost:4318
+#
+# Configure the OpenClaw plugin to point to http://localhost:4318
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.115.0
+    container_name: openclaw-otel-collector
+    restart: unless-stopped
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8888:8888"   # Collector metrics (Prometheus)
+    volumes:
+      - ./collector/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    environment:
+      - DYNATRACE_ENDPOINT=${DYNATRACE_ENDPOINT:-https://your-env.live.dynatrace.com/api/v2/otlp}
+      - DYNATRACE_API_TOKEN=${DYNATRACE_API_TOKEN:-your-token-here}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:13133/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

@@ -1,0 +1,75 @@
+# OpenTelemetry Collector configuration for OpenClaw observability
+#
+# This collector receives OTLP data from the OpenClaw plugin and forwards
+# it to Dynatrace (or any other backend). Adjust the exporters section
+# for your target backend.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+  # Optional: add resource attributes
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: "production"
+        action: upsert
+
+  # Optional: filter out noisy spans
+  # filter:
+  #   spans:
+  #     exclude:
+  #       match_type: strict
+  #       span_names:
+  #         - "health_check"
+
+exporters:
+  # ── Dynatrace (via OTLP) ──────────────────────────────────────────
+  # Replace with your Dynatrace environment URL and access token.
+  # Token needs: openTelemetryTrace.ingest, metrics.ingest, logs.ingest
+  otlphttp/dynatrace:
+    endpoint: "${DYNATRACE_ENDPOINT}"
+    headers:
+      Authorization: "Api-Token ${DYNATRACE_API_TOKEN}"
+
+  # ── Debug exporter (logs to stdout — useful for development) ──────
+  debug:
+    verbosity: basic
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+  # ── (Optional) OTLP to another backend ────────────────────────────
+  # Uncomment and configure for Grafana Tempo, Jaeger, etc.
+  # otlphttp/grafana:
+  #   endpoint: "http://tempo:4318"
+
+service:
+  telemetry:
+    logs:
+      level: info
+
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [otlphttp/dynatrace, debug]
+
+    metrics:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [otlphttp/dynatrace, debug]
+
+    logs:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [otlphttp/dynatrace, debug]

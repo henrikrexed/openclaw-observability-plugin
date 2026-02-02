@@ -1,0 +1,99 @@
+{
+  "id": "otel-observability",
+  "name": "OpenTelemetry Observability",
+  "description": "Traces, metrics, and logs for OpenClaw using OpenLLMetry and OpenTelemetry",
+  "version": "0.1.0",
+  "uiHints": {
+    "endpoint": {
+      "label": "OTLP Endpoint",
+      "placeholder": "http://localhost:4318"
+    },
+    "protocol": {
+      "label": "OTLP Protocol",
+      "help": "Use 'http' for OTLP/HTTP (port 4318) or 'grpc' for OTLP/gRPC (port 4317)"
+    },
+    "serviceName": {
+      "label": "Service Name",
+      "placeholder": "openclaw-gateway"
+    },
+    "headers": {
+      "label": "OTLP Headers",
+      "help": "Custom headers for OTLP export (e.g., Authorization for Dynatrace)"
+    },
+    "traces": {
+      "label": "Enable Traces"
+    },
+    "metrics": {
+      "label": "Enable Metrics"
+    },
+    "logs": {
+      "label": "Enable Logs"
+    },
+    "captureContent": {
+      "label": "Capture Prompt/Completion Content",
+      "help": "When enabled, records actual prompt and completion text in spans. Disable for privacy."
+    },
+    "metricsIntervalMs": {
+      "label": "Metrics Export Interval (ms)",
+      "advanced": true
+    },
+    "resourceAttributes": {
+      "label": "Extra Resource Attributes",
+      "advanced": true
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "endpoint": {
+        "type": "string",
+        "description": "OTLP endpoint URL (e.g., http://localhost:4318 for HTTP, http://localhost:4317 for gRPC)"
+      },
+      "protocol": {
+        "type": "string",
+        "enum": ["http", "grpc"],
+        "description": "OTLP export protocol"
+      },
+      "serviceName": {
+        "type": "string",
+        "description": "OpenTelemetry service name"
+      },
+      "headers": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "Custom headers for OTLP export"
+      },
+      "traces": {
+        "type": "boolean",
+        "description": "Enable trace export"
+      },
+      "metrics": {
+        "type": "boolean",
+        "description": "Enable metrics export"
+      },
+      "logs": {
+        "type": "boolean",
+        "description": "Enable log export"
+      },
+      "captureContent": {
+        "type": "boolean",
+        "description": "Capture prompt/completion content in spans"
+      },
+      "metricsIntervalMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "description": "Metrics export interval in milliseconds"
+      },
+      "resourceAttributes": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "Additional OTel resource attributes"
+      }
+    }
+  }
+}
