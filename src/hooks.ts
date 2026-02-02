@@ -231,6 +231,10 @@ export function registerHooks(
 
   // ── agent_end ────────────────────────────────────────────────────
   // Ends the agent turn span AND the root request span.
+  // Event shape from OpenClaw:
+  //   event: { messages, success, error?, durationMs }
+  //   ctx:   { agentId, sessionKey, workspaceDir, messageProvider? }
+  // Token usage is embedded in the last assistant message's .usage field.
 
   api.on(
     "agent_end",
@@ -239,7 +243,29 @@ export function registerHooks(
         const sessionKey = event?.sessionKey || ctx?.sessionKey || "unknown";
         const agentId = event?.agentId || ctx?.agentId || "unknown";
         const durationMs = event?.durationMs;
-        const tokenUsage = event?.usage || event?.tokenUsage;
+        const success = event?.success !== false;
+        const errorMsg = event?.error;
+
+        // Extract token usage from the messages array
+        // Each assistant message has .usage with inputTokens/outputTokens
+        const messages: any[] = event?.messages || [];
+        let totalInputTokens = 0;
+        let totalOutputTokens = 0;
+        let model = "unknown";
+
+        for (const msg of messages) {
+          if (msg?.role === "assistant" && msg?.usage) {
+            const u = msg.usage;
+            if (typeof u.inputTokens === "number") totalInputTokens += u.inputTokens;
+            if (typeof u.input_tokens === "number") totalInputTokens += u.input_tokens;
+            if (typeof u.outputTokens === "number") totalOutputTokens += u.outputTokens;
+            if (typeof u.output_tokens === "number") totalOutputTokens += u.output_tokens;
+          }
+          // Grab model from the last assistant message
+          if (msg?.role === "assistant" && msg?.model) {
+            model = msg.model;
+          }
+        }
 
         const sessionCtx = sessionContextMap.get(sessionKey);
 
@@ -255,20 +281,20 @@ export function registerHooks(
             });
           }
 
-          // Token usage if available
-          if (tokenUsage) {
-            if (typeof tokenUsage.inputTokens === "number") {
-              agentSpan.setAttribute("gen_ai.usage.input_tokens", tokenUsage.inputTokens);
-            }
-            if (typeof tokenUsage.outputTokens === "number") {
-              agentSpan.setAttribute("gen_ai.usage.output_tokens", tokenUsage.outputTokens);
-            }
-            if (typeof tokenUsage.totalTokens === "number") {
-              agentSpan.setAttribute("gen_ai.usage.total_tokens", tokenUsage.totalTokens);
-            }
+          // Token usage from messages
+          agentSpan.setAttribute("gen_ai.usage.input_tokens", totalInputTokens);
+          agentSpan.setAttribute("gen_ai.usage.output_tokens", totalOutputTokens);
+          agentSpan.setAttribute("gen_ai.usage.total_tokens", totalInputTokens + totalOutputTokens);
+          agentSpan.setAttribute("gen_ai.response.model", model);
+          agentSpan.setAttribute("openclaw.agent.success", success);
+
+          if (errorMsg) {
+            agentSpan.setAttribute("openclaw.agent.error", String(errorMsg).slice(0, 500));
+            agentSpan.setStatus({ code: SpanStatusCode.ERROR, message: String(errorMsg).slice(0, 200) });
+          } else {
+            agentSpan.setStatus({ code: SpanStatusCode.OK });
           }
 
-          agentSpan.setStatus({ code: SpanStatusCode.OK });
           agentSpan.end();
         }
 
