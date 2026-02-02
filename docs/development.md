@@ -27,7 +27,7 @@ openclaw-observability-plugin/
 ├── src/
 │   ├── config.ts               # Configuration parsing
 │   ├── telemetry.ts            # OTel SDK setup (providers, exporters, instruments)
-│   ├── openllmetry.ts          # OpenLLMetry initialization
+│   ├── openllmetry.ts          # GenAI instrumentation status check
 │   └── hooks.ts                # OpenClaw event hooks
 ├── collector/
 │   └── otel-collector-config.yaml  # OTel Collector config

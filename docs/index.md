@@ -6,10 +6,10 @@ Full **OpenTelemetry** observability for [OpenClaw](https://github.com/openclaw/
 
 Running an AI agent in production without observability is flying blind. You need to know:
 
-- **How much are LLM calls costing?** → Token usage metrics
-- **Why is the agent slow?** → Latency traces across LLM calls and tool executions
+- **How much are LLM calls costing?** → Token usage metrics by model
+- **Why is the agent slow?** → Latency traces across agent turns and tool executions
 - **What tools are being used?** → Tool call frequency and error rates
-- **What's the agent actually doing?** → Full distributed traces from message → LLM → tools → response
+- **What's the agent actually doing?** → Full connected traces from message → agent turn → tools → response
 
 This plugin gives you all of that with **zero code changes** to your OpenClaw setup.
 
@@ -18,13 +18,13 @@ This plugin gives you all of that with **zero code changes** to your OpenClaw se
 ```mermaid
 flowchart LR
     A[User Message] --> B[OpenClaw Gateway]
-    B --> C[LLM Call<br/>Anthropic/OpenAI]
+    B --> C[Agent Turn<br/>LLM Processing]
     B --> D[Tool Execution]
     B --> E[Response]
 
-    C -->|OpenLLMetry<br/>auto-instrumentation| F[OTel Spans]
-    D -->|Plugin hooks| F
-    B -->|Custom metrics| G[OTel Metrics]
+    C -->|Plugin hooks<br/>agent_end| F[OTel Spans]
+    D -->|Plugin hooks<br/>tool_result_persist| F
+    B -->|Counter/Histogram| G[OTel Metrics]
 
     F --> H[OTLP Export]
     G --> H
@@ -35,39 +35,45 @@ flowchart LR
     I --> L[Any Backend]
 ```
 
-### Auto-Instrumentation (OpenLLMetry)
+### Hook-Based Instrumentation
 
-[OpenLLMetry](https://github.com/traceloop/openllmetry-js) by Traceloop automatically instruments LLM SDK calls using standard OpenTelemetry monkey-patching. When the plugin starts, it patches the Anthropic and OpenAI client libraries **before** they make any API calls.
+The plugin hooks into OpenClaw's plugin API to capture telemetry at key points in the agent lifecycle:
 
-This means every `messages.create()` call to Claude or `chat.completions.create()` call to GPT automatically produces a rich OpenTelemetry span with:
+| Hook | What It Captures |
+|------|-----------------|
+| `message_received` | Creates root span for the request, records message count |
+| `before_agent_start` | Creates agent turn child span |
+| `tool_result_persist` | Creates tool execution spans with result metadata |
+| `agent_end` | Ends spans, extracts token usage from the LLM response |
+| `gateway:startup` | Records gateway startup event |
+| `command:new/reset/stop` | Records session lifecycle commands |
 
-- Model name and parameters
-- Token counts (prompt + completion)
-- Request/response latency
-- Error details and status codes
-- Optionally: full prompt and completion text
+Every agent turn produces connected spans with token counts, model info, duration, and tool details — all linked under a single trace ID per request.
 
-### Custom Plugin Instrumentation
+### Token Usage Extraction
 
-On top of OpenLLMetry's auto-instrumentation, the plugin adds:
+Token counts are extracted from the `agent_end` event's message array. Each assistant message carries usage data (`input`, `output`, `cacheRead`, `cacheWrite`) which the plugin records as both:
 
-- **Tool execution spans** via the `tool_result_persist` hook
-- **Session command spans** for `/new`, `/reset`, `/stop`
-- **Gateway lifecycle spans** for startup events
-- **Custom metrics** for token usage, tool calls, active sessions, and more
+- **Span attributes** — `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.total_tokens`, `gen_ai.response.model`
+- **OTel counter metrics** — `openclaw.llm.tokens.prompt`, `openclaw.llm.tokens.completion`, `openclaw.llm.tokens.total` (by model and agent)
 
 ## Features at a Glance
 
 | Feature | Description |
 |---------|-------------|
-| 🔍 **LLM Traces** | Auto-instrumented Anthropic/OpenAI calls via OpenLLMetry |
-| 🛠️ **Tool Traces** | Spans for every agent tool execution |
-| 📊 **Metrics** | Token usage, latency histograms, error rates, active sessions |
-| 📋 **Logs** | Structured gateway logs as OTel log records |
-| 🔒 **Privacy** | Content capture off by default — opt-in for prompt/completion recording |
+| 🔍 **Connected Traces** | Full request lifecycle: message → agent turn → tools, all linked |
+| 📊 **Token Metrics** | Token usage counters by model (prompt, completion, cache, total) |
+| 🛠️ **Tool Traces** | Individual spans for every tool call with result metadata |
+| ⏱️ **Duration Histograms** | Agent turn and tool execution duration distributions |
+| 📋 **Logs** | Structured gateway logs via OTel Collector filelog receiver |
+| 🔒 **Privacy** | No prompt/completion content captured — only metadata |
 | 🔌 **Any Backend** | OTLP export to Dynatrace, Grafana, Datadog, Honeycomb, and more |
 | ⚡ **Zero Code** | Just install, configure, and restart — no code changes needed |
 | 🐳 **Collector Included** | Docker Compose + config for local OTel Collector |
+
+## Known Limitations
+
+The plugin does **not** produce per-LLM-API-call spans (e.g., `anthropic.chat`). Token usage and model info are captured per **agent turn**, not per individual SDK call. See [Limitations](limitations.md) for the technical details and workarounds.
 
 ## Next Steps
 
@@ -88,5 +94,9 @@ On top of OpenLLMetry's auto-instrumentation, the plugin adds:
 - :material-transit-connection-variant: **[Backends](backends/index.md)**
 
     Connect to Dynatrace, Grafana, or any OTLP backend
+
+- :material-alert-circle: **[Limitations](limitations.md)**
+
+    Current constraints and planned improvements
 
 </div>

@@ -75,6 +75,7 @@ nav:
     - Grafana: backends/grafana.md
     - Generic OTLP: backends/generic-otlp.md
   - Architecture: architecture.md
+  - Limitations: limitations.md
   - Development: development.md
 
 extra:

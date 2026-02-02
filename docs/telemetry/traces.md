@@ -1,81 +1,106 @@
 # Traces Reference
 
-The plugin generates two categories of traces: **auto-instrumented** (via OpenLLMetry) and **custom** (via plugin hooks).
+The plugin generates connected distributed traces using OpenClaw's hook-based plugin API.
 
-## Auto-Instrumented Spans (OpenLLMetry)
+## Trace Structure
 
-These spans are created automatically by OpenLLMetry when LLM SDK methods are called. No configuration beyond enabling traces is needed.
+Every user message produces a trace tree:
 
-### Anthropic Spans
+```
+openclaw.request (SERVER span — full message lifecycle)
+├── openclaw.agent.turn (INTERNAL — LLM processing)
+│   ├── gen_ai.usage.input_tokens: 4521
+│   ├── gen_ai.usage.output_tokens: 892
+│   ├── gen_ai.usage.total_tokens: 5413
+│   ├── gen_ai.response.model: claude-opus-4-5
+│   ├── tool.exec (INTERNAL — 156ms)
+│   ├── tool.Read (INTERNAL — 12ms)
+│   └── tool.web_fetch (INTERNAL — 1200ms)
+└── openclaw.command.new (INTERNAL — if session reset)
+```
 
-| Span Name | Kind | Description |
-|-----------|------|-------------|
-| `anthropic.messages.create` | Client | Claude messages API call |
-| `anthropic.completions.create` | Client | Legacy completions API call |
+All spans within a request share the same `traceId` and are linked via parent-child relationships.
+
+## Request Span
+
+Created by the `message_received` hook. This is the root span for the entire request lifecycle.
+
+| Field | Value |
+|-------|-------|
+| **Span Name** | `openclaw.request` |
+| **Kind** | `SERVER` |
 
 **Attributes:**
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `gen_ai.system` | string | `"anthropic"` |
-| `gen_ai.request.model` | string | Model name (e.g., `"claude-sonnet-4-20250514"`) |
-| `gen_ai.request.max_tokens` | int | Max tokens requested |
-| `gen_ai.request.temperature` | float | Temperature setting |
-| `gen_ai.request.top_p` | float | Top-p setting |
-| `gen_ai.response.model` | string | Actual model used |
-| `gen_ai.usage.prompt_tokens` | int | Prompt token count |
-| `gen_ai.usage.completion_tokens` | int | Completion token count |
-| `gen_ai.response.finish_reasons` | string[] | Stop reasons |
+| `openclaw.message.channel` | string | Source channel (`whatsapp`, `telegram`, `discord`, etc.) |
+| `openclaw.session.key` | string | Session identifier |
+| `openclaw.message.direction` | string | Always `"inbound"` |
+| `openclaw.message.from` | string | Sender identifier |
+| `openclaw.request.duration_ms` | int | Total request duration |
 
-When `captureContent: true`:
+## Agent Turn Span
+
+Created by `before_agent_start`, ended by `agent_end`. Child of the request span.
+
+| Field | Value |
+|-------|-------|
+| **Span Name** | `openclaw.agent.turn` |
+| **Kind** | `INTERNAL` |
+
+**Attributes:**
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `gen_ai.prompt` | string | Full prompt text |
-| `gen_ai.completion` | string | Full completion text |
+| `openclaw.agent.id` | string | Agent identifier |
+| `openclaw.session.key` | string | Session identifier |
+| `openclaw.agent.model` | string | Model requested |
+| `openclaw.agent.duration_ms` | int | Turn duration in milliseconds |
+| `openclaw.agent.success` | boolean | Whether the turn completed successfully |
+| `openclaw.agent.error` | string | Error message (if failed) |
+| `gen_ai.usage.input_tokens` | int | Total input tokens (including cache read/write) |
+| `gen_ai.usage.output_tokens` | int | Total output tokens |
+| `gen_ai.usage.total_tokens` | int | Sum of input + output tokens |
+| `gen_ai.response.model` | string | Actual model used (from last assistant message) |
 
-### OpenAI Spans
+!!! note "Token Counts"
+    Token counts are **summed across all assistant messages** in the turn. If the agent makes multiple LLM calls (e.g., tool use loop), the totals reflect all calls combined. Cache tokens (`cacheRead`, `cacheWrite`) are included in the input token count.
 
-| Span Name | Kind | Description |
-|-----------|------|-------------|
-| `openai.chat.completions.create` | Client | Chat completions API call |
-| `openai.embeddings.create` | Client | Embeddings API call |
+## Tool Execution Spans
 
-**Attributes:** Same as Anthropic spans, with `gen_ai.system = "openai"`.
+Created by the `tool_result_persist` hook. Child of the agent turn span.
 
-## Custom Spans (Plugin Hooks)
+| Field | Value |
+|-------|-------|
+| **Span Name** | `tool.<tool_name>` |
+| **Kind** | `INTERNAL` |
 
-These spans are created by the plugin's hook system.
-
-### Tool Execution Spans
-
-Created by the `tool_result_persist` hook for every agent tool call.
-
-| Span Name | Kind | Description |
-|-----------|------|-------------|
-| `tool.<tool_name>` | Internal | Individual tool execution |
-
-**Examples:** `tool.exec`, `tool.web_fetch`, `tool.browser`, `tool.Read`, `tool.Write`, `tool.memory_search`
+**Examples:** `tool.exec`, `tool.web_fetch`, `tool.browser`, `tool.Read`, `tool.Write`, `tool.memory_search`, `tool.Edit`
 
 **Attributes:**
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `openclaw.tool.name` | string | Tool name |
-| `openclaw.tool.is_error` | boolean | Whether the tool errored |
-| `openclaw.tool.duration_ms` | float | Execution duration (when available) |
+| `openclaw.tool.call_id` | string | Unique tool call identifier |
+| `openclaw.tool.is_synthetic` | boolean | Whether the tool call is synthetic |
 | `openclaw.tool.result_chars` | int | Total characters in result |
-| `openclaw.tool.result_parts` | int | Number of content parts |
+| `openclaw.tool.result_parts` | int | Number of content parts in result |
+| `openclaw.session.key` | string | Session identifier |
+| `openclaw.agent.id` | string | Agent identifier |
 
-### Command Spans
+**Status:** `OK` on success, `ERROR` if the tool returned an error.
+
+## Command Spans
 
 Created when session commands are issued.
 
 | Span Name | Kind | Description |
 |-----------|------|-------------|
-| `openclaw.command.new` | Internal | `/new` command |
-| `openclaw.command.reset` | Internal | `/reset` command |
-| `openclaw.command.stop` | Internal | `/stop` command |
+| `openclaw.command.new` | INTERNAL | `/new` command |
+| `openclaw.command.reset` | INTERNAL | `/reset` command |
+| `openclaw.command.stop` | INTERNAL | `/stop` command |
 
 **Attributes:**
 
@@ -83,47 +108,58 @@ Created when session commands are issued.
 |-----------|------|-------------|
 | `openclaw.command.action` | string | Command name |
 | `openclaw.command.session_key` | string | Session identifier |
-| `openclaw.command.source` | string | Channel source (e.g., `"whatsapp"`, `"telegram"`) |
+| `openclaw.command.source` | string | Command source |
 
-### Gateway Spans
+## Gateway Spans
 
 | Span Name | Kind | Description |
 |-----------|------|-------------|
-| `openclaw.gateway.startup` | Internal | Gateway startup event |
+| `openclaw.gateway.startup` | INTERNAL | Gateway startup event |
 
-## Trace Context
+## Trace Context Propagation
 
-All spans share the same OpenTelemetry resource:
+The plugin maintains a `sessionContextMap` keyed by `sessionKey`:
 
-| Resource Attribute | Value |
-|-------------------|-------|
-| `service.name` | Configured `serviceName` |
-| `service.version` | Plugin version |
-| `openclaw.plugin` | `"otel-observability"` |
-| *(custom)* | Any `resourceAttributes` from config |
+1. `message_received` creates a root span and stores its context
+2. `before_agent_start` creates an agent turn span as a child of the root
+3. `tool_result_persist` creates tool spans as children of the agent turn
+4. `agent_end` ends the agent turn and root spans, cleans up the context
 
-## Example Trace
+Stale contexts (no `agent_end` within 5 minutes) are automatically cleaned up.
 
-A typical agent turn produces a trace like:
+## Example DQL Queries (Dynatrace)
 
+**Token usage per agent turn:**
+
+```sql
+fetch spans, samplingRatio:1
+| filter contains(endpoint.name, "openclaw.agent.turn")
+| fields start_time, duration, gen_ai.usage.input_tokens,
+         gen_ai.usage.output_tokens, gen_ai.usage.total_tokens,
+         gen_ai.response.model
+| sort start_time desc
+| limit 20
 ```
-[agent turn]
-├── anthropic.messages.create (2340ms)
-│   ├── gen_ai.request.model: claude-sonnet-4-20250514
-│   ├── gen_ai.usage.prompt_tokens: 1523
-│   └── gen_ai.usage.completion_tokens: 342
-├── tool.exec (156ms)
-│   ├── openclaw.tool.name: exec
-│   └── openclaw.tool.is_error: false
-├── tool.Read (12ms)
-│   ├── openclaw.tool.name: Read
-│   └── openclaw.tool.result_chars: 4521
-└── anthropic.messages.create (1890ms)
-    ├── gen_ai.request.model: claude-sonnet-4-20250514
-    ├── gen_ai.usage.prompt_tokens: 2891
-    └── gen_ai.usage.completion_tokens: 189
+
+**Tool execution breakdown:**
+
+```sql
+fetch spans, samplingRatio:1
+| filter startsWith(span.name, "tool.")
+| fields start_time, span.name, duration, openclaw.tool.result_chars
+| sort start_time desc
+| limit 50
+```
+
+**Full trace for a session:**
+
+```sql
+fetch spans, samplingRatio:1
+| filter openclaw.session.key == "agent:main:main"
+| fields start_time, span.name, duration, span.kind, trace.id
+| sort start_time desc
 ```
 
 ## Semantic Conventions
 
-OpenLLMetry follows the [OpenTelemetry GenAI Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/), which are now an official part of the OpenTelemetry specification. This means your traces are compatible with any tool that understands these conventions.
+The plugin follows [OpenTelemetry GenAI Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) for token-related attributes (`gen_ai.usage.*`, `gen_ai.response.model`). Custom OpenClaw attributes use the `openclaw.*` namespace.

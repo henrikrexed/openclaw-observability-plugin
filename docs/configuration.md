@@ -119,8 +119,8 @@ Custom HTTP headers sent with every OTLP export request. Use this for authentica
 
 Enable or disable trace export. When `true`:
 
-- OpenLLMetry auto-instruments Anthropic/OpenAI SDK calls
-- Custom spans are created for tool executions and commands
+- Connected traces are created for requests, agent turns, and tool executions
+- GenAI attributes (token counts, model) are added to agent turn spans
 - Spans are exported via OTLP to the configured endpoint
 
 ---
@@ -157,7 +157,7 @@ Enable or disable log export. When `true`, structured gateway logs are forwarded
 | **Default** | `false` |
 | **Required** | No |
 
-When enabled, OpenLLMetry records the actual **prompt text** and **completion text** inside trace spans. This is extremely useful for debugging but has privacy implications.
+Reserved for future use. When per-LLM-call auto-instrumentation becomes available, this would enable recording prompt and completion text inside trace spans. Currently has no effect — the plugin does not capture message content. See [Limitations](limitations.md).
 
 !!! danger "Privacy Warning"
     Enabling `captureContent` means LLM conversations — which may contain personal data, credentials, or sensitive business information — will be stored in your observability backend. Only enable this when:

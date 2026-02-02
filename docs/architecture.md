@@ -8,7 +8,6 @@ How the plugin integrates with OpenClaw and the OpenTelemetry ecosystem.
 sequenceDiagram
     participant GW as OpenClaw Gateway
     participant P as OTel Plugin
-    participant OL as OpenLLMetry
     participant SDK as OTel SDK
     participant Col as OTel Collector
 
@@ -16,21 +15,26 @@ sequenceDiagram
     Note over P: Register RPC, CLI, tool, service
 
     GW->>P: service.start()
-    P->>OL: initOpenLLMetry()
-    Note over OL: Monkey-patch Anthropic/OpenAI SDKs
     P->>SDK: initTelemetry()
     Note over SDK: Create TracerProvider + MeterProvider
     P->>P: registerHooks()
-    Note over P: Hook into tool_result_persist, commands
+    Note over P: Hook into message_received, agent_end, tools
 
     loop Agent Turn
-        GW->>OL: Anthropic SDK call
-        OL->>SDK: Create LLM span
-        SDK->>Col: Export span (batch)
+        GW->>P: message_received hook
+        P->>SDK: Create root span (openclaw.request)
 
-        GW->>P: tool_result_persist hook
-        P->>SDK: Create tool span + update metrics
-        SDK->>Col: Export span + metrics (batch)
+        GW->>P: before_agent_start hook
+        P->>SDK: Create agent turn span (child of root)
+
+        GW->>P: tool_result_persist hook (per tool)
+        P->>SDK: Create tool span (child of agent turn)
+        P->>SDK: Update tool metrics
+
+        GW->>P: agent_end hook
+        P->>SDK: Set token attrs + end spans
+        P->>SDK: Update token/duration metrics
+        SDK->>Col: Export spans + metrics (batch)
     end
 
     GW->>P: service.stop()
@@ -49,34 +53,44 @@ The main plugin object registers everything with the OpenClaw plugin API:
 - **CLI command** — `openclaw otel` for local status
 - **Agent tool** — `otel_status` for in-conversation checks
 
-### src/openllmetry.ts — LLM Auto-Instrumentation
-
-Initializes the Traceloop Node.js SDK, which:
-
-1. Discovers Anthropic and OpenAI SDK modules
-2. Wraps their HTTP client methods with OTel span creation
-3. Extracts model, tokens, latency, and content from requests/responses
-4. Produces spans following [GenAI Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
-
-!!! important "Import Order"
-    OpenLLMetry must initialize **before** the LLM SDKs make their first call. Since OpenClaw plugins load at gateway startup (before the agent loop runs), this is handled naturally.
-
 ### src/telemetry.ts — OTel SDK Setup
 
 Creates and configures:
 
-- **NodeTracerProvider** — manages trace span creation and export
-- **MeterProvider** — manages metric instruments and periodic export
+- **NodeTracerProvider** — manages trace span creation and export, registered globally
+- **MeterProvider** — manages metric instruments and periodic export, registered globally via `metrics.setGlobalMeterProvider()`
 - **OTLP Exporters** — HTTP or gRPC exporters for traces and metrics
 - **Instruments** — counters, histograms, and gauges for OpenClaw-specific metrics
 
 ### src/hooks.ts — Event Hooks
 
-Registers OpenClaw hooks:
+The core instrumentation layer. Registers hooks on OpenClaw's two hook systems:
 
-- **`tool_result_persist`** — fires synchronously before each tool result is saved. Creates a span and updates tool metrics. Returns `undefined` to keep the tool result unchanged.
-- **Command events** — creates spans for `/new`, `/reset`, `/stop` commands
-- **Gateway events** — creates a span for gateway startup
+**Typed hooks** (via `api.on()`):
+
+| Hook | Purpose |
+|------|---------|
+| `message_received` | Creates root span (`openclaw.request`), stores in session context map |
+| `before_agent_start` | Creates child span (`openclaw.agent.turn`) under root |
+| `tool_result_persist` | Creates tool spans under agent turn, records tool metrics |
+| `agent_end` | Extracts token usage from messages, sets GenAI attributes, ends spans, records metrics |
+
+**Event-stream hooks** (via `api.registerHook()`):
+
+| Hook | Purpose |
+|------|---------|
+| `command:new/reset/stop` | Creates command lifecycle spans |
+| `gateway:startup` | Records gateway startup event |
+
+#### Trace Context Propagation
+
+A `sessionContextMap` (keyed by `sessionKey`) stores the active root span and agent span contexts. This allows child spans (tools, agent turns) to be linked as children of the root request span, producing **connected traces** rather than isolated spans.
+
+Stale contexts are cleaned up automatically after 5 minutes.
+
+### src/openllmetry.ts — GenAI Status Check
+
+Checks whether OTel GenAI auto-instrumentation is active via a `NODE_OPTIONS` preload script. Currently serves as a status reporter only — direct SDK auto-instrumentation is not possible from plugin code due to ESM/CJS module isolation. See [Limitations](limitations.md) for details.
 
 ### src/config.ts — Configuration
 
@@ -87,9 +101,9 @@ Parses and validates plugin configuration with sensible defaults.
 ### Traces
 
 ```
-LLM SDK call
-    ↓ (monkey-patched by OpenLLMetry)
-OTel Span created with GenAI attributes
+OpenClaw hook fires (message_received, agent_end, etc.)
+    ↓
+Plugin creates OTel span with attributes
     ↓
 BatchSpanProcessor (buffers spans)
     ↓ (on flush interval or batch size)
@@ -101,7 +115,7 @@ OTel Collector or Backend
 ### Metrics
 
 ```
-Plugin hook fires (tool call, command, etc.)
+Plugin hook fires (tool call, agent_end, etc.)
     ↓
 Counter.add() / Histogram.record()
     ↓
@@ -118,7 +132,7 @@ Every span, metric, and log record carries these resource attributes:
 
 | Attribute | Value |
 |-----------|-------|
-| `service.name` | From `serviceName` config |
+| `service.name` | From `serviceName` config (default: `openclaw-gateway`) |
 | `service.version` | Plugin version (`0.1.0`) |
 | `openclaw.plugin` | `"otel-observability"` |
 | *(custom)* | From `resourceAttributes` config |
@@ -127,17 +141,16 @@ Every span, metric, and log record carries these resource attributes:
 
 ### Content Privacy
 
-By default, `captureContent: false` means:
+The plugin does **not** capture prompt or completion text. Only metadata is recorded:
 
-- No prompt text is recorded in spans
-- No completion text is recorded in spans
-- Only metadata (model, tokens, latency) is captured
-
-When enabled, full prompt/completion text is stored in your backend.
+- Model name and token counts
+- Tool names and result sizes
+- Span durations and status codes
+- Session keys and channel identifiers
 
 ### Credential Handling
 
-- Backend auth headers are stored in OpenClaw config (encrypted at rest if using OpenClaw's config encryption)
+- Backend auth headers are stored in OpenClaw config
 - When using the OTel Collector, credentials are on the collector only — the plugin sends to `localhost` unauthenticated
 
 ### Network
@@ -153,5 +166,4 @@ The plugin is designed to have minimal impact on agent performance:
 - **Span creation** is fast (~microseconds) — no I/O during span creation
 - **Metric updates** are atomic counter increments — no I/O
 - **Export is batched** — spans/metrics are flushed periodically, not on every event
-- **Hooks are synchronous but fast** — the `tool_result_persist` hook does minimal work
-- **OpenLLMetry patching** adds ~1-2ms overhead per LLM call (negligible vs. LLM latency)
+- **All hooks are wrapped in try/catch** — telemetry errors never break the main agent flow

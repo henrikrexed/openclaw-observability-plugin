@@ -139,7 +139,7 @@ service:
 1. Go to **Explore**
 2. Select the **Tempo** data source
 3. Search by service name: `openclaw-gateway`
-4. Or search by span name: `anthropic.messages.create`
+4. Or search by span name: `openclaw.agent.turn` or `tool.*`
 
 ### Example Dashboard Panels
 
