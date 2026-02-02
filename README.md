@@ -1,92 +1,79 @@
 # 🔭 OpenClaw Observability Plugin
 
-OpenTelemetry observability for [OpenClaw](https://github.com/openclaw/openclaw) — full traces, metrics, and logs for your AI agent.
+Full **OpenTelemetry** observability for [OpenClaw](https://github.com/openclaw/openclaw) AI agents — traces, metrics, and logs out of the box.
 
-Uses [OpenLLMetry](https://github.com/traceloop/openllmetry-js) to auto-instrument LLM calls (Anthropic, OpenAI) and exports everything via OTLP to any OpenTelemetry-compatible backend.
+Auto-instruments LLM calls (Anthropic, OpenAI) using [OpenLLMetry](https://github.com/traceloop/openllmetry-js) and exports everything via **OTLP** to any OpenTelemetry-compatible backend: Dynatrace, Grafana, Datadog, Honeycomb, and more.
+
+📖 **Full documentation:** [https://henrikrexed.github.io/openclaw-observability-plugin](https://henrikrexed.github.io/openclaw-observability-plugin)
+
+---
 
 ## Architecture
 
 ```
-┌──────────────────────────┐
-│   OpenClaw Gateway       │
-│  ┌────────────────────┐  │
-│  │  OTel Plugin        │  │
-│  │  ├─ OpenLLMetry     │──┼──► OTLP ──► OTel Collector ──► Dynatrace
-│  │  ├─ Custom Spans    │  │                              ├── Grafana
-│  │  ├─ Metrics         │  │                              ├── Datadog
-│  │  └─ Logs            │  │                              └── any backend
-│  └────────────────────┘  │
-└──────────────────────────┘
+┌──────────────────────────────┐
+│     OpenClaw Gateway         │
+│  ┌────────────────────────┐  │
+│  │  OTel Observability    │  │
+│  │  Plugin                │  │
+│  │  ├─ OpenLLMetry        │──┼──► OTLP ──► OTel Collector ──► Dynatrace
+│  │  │  (auto-instrument)  │  │         │                    ├── Grafana
+│  │  ├─ Custom Spans       │  │         │                    ├── Datadog
+│  │  ├─ Metrics            │  │         │                    └── any backend
+│  │  └─ Logs               │  │         │
+│  └────────────────────────┘  │         └──► Direct OTLP ──► Dynatrace
+└──────────────────────────────┘
 ```
 
 ## What You Get
 
-### Traces (via OpenLLMetry)
-- **LLM API calls** — auto-instrumented Anthropic/OpenAI requests with:
-  - Model name, token counts (prompt + completion)
-  - Request/response latency
-  - Error details
-  - Optional: prompt/completion content capture
+### 🔍 Traces
+- **LLM API calls** — auto-instrumented via OpenLLMetry with model name, token counts, latency, errors
 - **Tool executions** — spans for every agent tool call (exec, web_fetch, browser, etc.)
-- **Session commands** — `/new`, `/reset`, `/stop` events
-- **Gateway lifecycle** — startup events
+- **Session commands** — `/new`, `/reset`, `/stop` lifecycle events
+- **Gateway lifecycle** — startup and shutdown events
+- **Optional content capture** — record actual prompts/completions (disabled by default for privacy)
 
-### Metrics
-| Metric | Type | Description |
-|--------|------|-------------|
-| `openclaw.llm.requests` | Counter | Total LLM API requests |
-| `openclaw.llm.errors` | Counter | Total LLM API errors |
-| `openclaw.llm.tokens.total` | Counter | Total tokens consumed |
-| `openclaw.llm.tokens.prompt` | Counter | Prompt tokens |
-| `openclaw.llm.tokens.completion` | Counter | Completion tokens |
-| `openclaw.llm.duration` | Histogram | LLM request duration (ms) |
-| `openclaw.tool.calls` | Counter | Tool invocations |
-| `openclaw.tool.errors` | Counter | Tool errors |
-| `openclaw.tool.duration` | Histogram | Tool execution duration (ms) |
-| `openclaw.agent.turn_duration` | Histogram | Full agent turn duration (ms) |
-| `openclaw.session.resets` | Counter | Session resets |
-| `openclaw.sessions.active` | UpDownCounter | Active sessions |
-| `openclaw.messages.received` | Counter | Inbound messages |
-| `openclaw.messages.sent` | Counter | Outbound messages |
+### 📊 Metrics
+- Token usage counters (prompt, completion, total)
+- LLM request duration histograms
+- Tool call frequency and error rates
+- Agent turn duration
+- Active session gauge
+- Message counters (inbound/outbound)
 
-All metrics include relevant attributes (model, tool name, channel, etc.) for filtering/grouping.
+### 📋 Logs
+- Structured gateway logs forwarded as OTel log records
 
 ## Quick Start
 
-### 1. Deploy the OTel Collector
-
 ```bash
-# Set your Dynatrace credentials
-export DYNATRACE_ENDPOINT=https://<YOUR_ENV>.live.dynatrace.com/api/v2/otlp
-export DYNATRACE_API_TOKEN=<YOUR_ACCESS_TOKEN>
-
-# Start the collector
-docker compose up -d
-```
-
-The collector listens on:
-- `localhost:4317` — OTLP/gRPC
-- `localhost:4318` — OTLP/HTTP
-
-### 2. Install the Plugin
-
-```bash
-# From the plugin directory
+# 1. Clone and install
+git clone https://github.com/henrikrexed/openclaw-observability-plugin.git
 cd openclaw-observability-plugin
 npm install
 
-# Install into OpenClaw
+# 2. Install into OpenClaw
 openclaw plugins install .
+
+# 3. Start an OTel Collector (optional — see docs for direct export)
+export DYNATRACE_ENDPOINT=https://<YOUR_ENV>.live.dynatrace.com/api/v2/otlp
+export DYNATRACE_API_TOKEN=<YOUR_ACCESS_TOKEN>
+docker compose up -d
+
+# 4. Configure the plugin in your OpenClaw config
+# See docs/getting-started.md for full config
+
+# 5. Restart gateway
+openclaw gateway restart
+
+# 6. Verify
+openclaw otel
 ```
 
-Or link for development:
-```bash
-openclaw plugins install -l .
-```
+See the [Getting Started guide](https://henrikrexed.github.io/openclaw-observability-plugin/getting-started/) for detailed instructions.
 
-### 3. Configure
-
-Add to your OpenClaw config:
+## Configuration
 
 ```json
 {
@@ -109,99 +96,26 @@ Add to your OpenClaw config:
 }
 ```
 
-### 4. Restart Gateway
+See the full [Configuration Reference](https://henrikrexed.github.io/openclaw-observability-plugin/configuration/).
 
-```bash
-openclaw gateway restart
-```
+## Backends
 
-### 5. Verify
-
-```bash
-# Check plugin status
-openclaw otel
-
-# Should show:
-# 🔭 OpenTelemetry Observability Plugin
-# ────────────────────────────────────────
-#   Endpoint:        http://localhost:4318
-#   Protocol:        http
-#   Service:         openclaw-gateway
-#   Traces:          ✅
-#   Metrics:         ✅
-#   Initialized:     ✅
-```
-
-## Configuration Reference
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `endpoint` | string | `http://localhost:4318` | OTLP endpoint URL |
-| `protocol` | `"http"` \| `"grpc"` | `"http"` | OTLP export protocol |
-| `serviceName` | string | `"openclaw-gateway"` | OTel service name |
-| `headers` | object | `{}` | Custom OTLP headers (auth, etc.) |
-| `traces` | boolean | `true` | Enable trace export |
-| `metrics` | boolean | `true` | Enable metrics export |
-| `logs` | boolean | `true` | Enable log export |
-| `captureContent` | boolean | `false` | Record prompt/completion text in spans |
-| `metricsIntervalMs` | number | `30000` | Metrics export interval (ms) |
-| `resourceAttributes` | object | `{}` | Extra OTel resource attributes |
-
-## Dynatrace Setup
-
-### Direct (no collector)
-
-Point the plugin directly at Dynatrace:
-
-```json
-{
-  "config": {
-    "endpoint": "https://<YOUR_ENV>.live.dynatrace.com/api/v2/otlp",
-    "headers": {
-      "Authorization": "Api-Token <YOUR_TOKEN>"
-    }
-  }
-}
-```
-
-Required Dynatrace token scopes:
-- `openTelemetryTrace.ingest`
-- `metrics.ingest`
-- `logs.ingest`
-
-### Via OTel Collector (recommended)
-
-Use the included `docker-compose.yaml` and `collector/otel-collector-config.yaml`. The collector gives you:
-- Batching and retry
-- Data processing/filtering
-- Fan-out to multiple backends
-- Decoupled auth (credentials stay on the collector, not in OpenClaw config)
+| Backend | Setup Guide |
+|---------|-------------|
+| Dynatrace | [Dynatrace integration](https://henrikrexed.github.io/openclaw-observability-plugin/backends/dynatrace/) |
+| OTel Collector | [Collector setup](https://henrikrexed.github.io/openclaw-observability-plugin/backends/otel-collector/) |
+| Grafana / Tempo | [Grafana integration](https://henrikrexed.github.io/openclaw-observability-plugin/backends/grafana/) |
+| Any OTLP backend | [Generic OTLP](https://henrikrexed.github.io/openclaw-observability-plugin/backends/generic-otlp/) |
 
 ## Development
 
 ```bash
-# Clone
-git clone https://github.com/henrikrexed/openclaw-observability-plugin.git
-cd openclaw-observability-plugin
-
-# Install deps
-npm install
-
-# Link to OpenClaw for dev
+# Link for development (live reload on gateway restart)
 openclaw plugins install -l .
 
 # Type-check
 npm run typecheck
 ```
-
-## How It Works
-
-1. **Gateway startup** → Plugin registers as a background service
-2. **Service start** → Initializes OpenLLMetry (monkey-patches Anthropic/OpenAI SDKs) and sets up OTel trace/metrics providers
-3. **LLM calls** → OpenLLMetry auto-creates spans with GenAI semantic conventions
-4. **Tool calls** → `tool_result_persist` hook creates spans + updates metrics
-5. **Commands** → Command hooks track `/new`, `/reset` events
-6. **Export** → BatchSpanProcessor + PeriodicExportingMetricReader send data via OTLP
 
 ## License
 

@@ -1,0 +1,85 @@
+site_name: OpenClaw Observability Plugin
+site_description: OpenTelemetry observability for OpenClaw AI agents — traces, metrics, and logs
+site_url: https://henrikrexed.github.io/openclaw-observability-plugin
+repo_url: https://github.com/henrikrexed/openclaw-observability-plugin
+repo_name: henrikrexed/openclaw-observability-plugin
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - content.code.copy
+    - content.code.annotate
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - toc.follow
+    - search.suggest
+    - search.highlight
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Configuration: configuration.md
+  - Telemetry Reference:
+    - Traces: telemetry/traces.md
+    - Metrics: telemetry/metrics.md
+  - Backends:
+    - Overview: backends/index.md
+    - Dynatrace: backends/dynatrace.md
+    - OTel Collector: backends/otel-collector.md
+    - Grafana: backends/grafana.md
+    - Generic OTLP: backends/generic-otlp.md
+  - Architecture: architecture.md
+  - Development: development.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/henrikrexed/openclaw-observability-plugin
+    - icon: fontawesome/brands/youtube
+      link: https://youtube.com/@IsItObservable
