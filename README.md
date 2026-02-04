@@ -1,6 +1,11 @@
 # OpenClaw Observability
 
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://henrikrexed.github.io/openclaw-observability-plugin/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 OpenTelemetry observability for [OpenClaw](https://github.com/openclaw/openclaw) AI agents.
+
+📖 **[Full Documentation](https://henrikrexed.github.io/openclaw-observability-plugin/)** — Setup guides, configuration reference, and backend examples.
 
 ## Two Approaches to Observability
 
