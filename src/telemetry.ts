@@ -54,6 +54,14 @@ export interface OtelCounters {
   messagesReceived: Counter;
   /** Messages sent */
   messagesSent: Counter;
+  /** Security events detected */
+  securityEvents: Counter;
+  /** Sensitive file access attempts */
+  sensitiveFileAccess: Counter;
+  /** Prompt injection attempts */
+  promptInjection: Counter;
+  /** Dangerous command executions */
+  dangerousCommand: Counter;
 }
 
 export interface OtelHistograms {
@@ -183,6 +191,23 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     messagesSent: meter.createCounter("openclaw.messages.sent", {
       description: "Total outbound messages",
       unit: "messages",
+    }),
+    // Security detection counters
+    securityEvents: meter.createCounter("openclaw.security.events", {
+      description: "Total security events detected",
+      unit: "events",
+    }),
+    sensitiveFileAccess: meter.createCounter("openclaw.security.sensitive_file_access", {
+      description: "Sensitive file access attempts",
+      unit: "events",
+    }),
+    promptInjection: meter.createCounter("openclaw.security.prompt_injection", {
+      description: "Prompt injection attempts detected",
+      unit: "events",
+    }),
+    dangerousCommand: meter.createCounter("openclaw.security.dangerous_command", {
+      description: "Dangerous command executions detected",
+      unit: "events",
     }),
   };
 

@@ -26,6 +26,7 @@ import { SpanKind, SpanStatusCode, context, trace, type Span, type Context } fro
 import type { TelemetryRuntime } from "./telemetry.js";
 import type { OtelObservabilityConfig } from "./config.js";
 import { activeAgentSpans, getPendingUsage, enrichSpanWithUsage, hasDiagnosticsSupport } from "./diagnostics.js";
+import { checkToolSecurity, checkMessageSecurity, type SecurityCounters } from "./security.js";
 
 /** Active trace context for a session — allows connecting spans into one trace. */
 interface SessionTraceContext {
@@ -58,6 +59,14 @@ export function registerHooks(
   // Creates the ROOT span for the entire request lifecycle.
   // All subsequent spans (agent, tools) become children of this span.
 
+  // Build security counters object for detection module
+  const securityCounters: SecurityCounters = {
+    securityEvents: counters.securityEvents,
+    sensitiveFileAccess: counters.sensitiveFileAccess,
+    promptInjection: counters.promptInjection,
+    dangerousCommand: counters.dangerousCommand,
+  };
+
   api.on(
     "message_received",
     async (event: any, ctx: any) => {
@@ -65,6 +74,7 @@ export function registerHooks(
         const channel = event?.channel || "unknown";
         const sessionKey = event?.sessionKey || ctx?.sessionKey || "unknown";
         const from = event?.from || event?.senderId || "unknown";
+        const messageText = event?.text || event?.message || "";
 
         // Create root span for this request
         const rootSpan = tracer.startSpan("openclaw.request", {
@@ -76,6 +86,19 @@ export function registerHooks(
             "openclaw.message.from": from,
           },
         });
+
+        // ═══ SECURITY DETECTION 2: Prompt Injection ═══════════════
+        if (messageText && typeof messageText === "string" && messageText.length > 0) {
+          const securityEvent = checkMessageSecurity(
+            messageText,
+            rootSpan,
+            securityCounters,
+            sessionKey
+          );
+          if (securityEvent) {
+            logger.warn?.(`[otel] SECURITY: ${securityEvent.detection} - ${securityEvent.description}`);
+          }
+        }
 
         // Store the context so child spans can reference it
         const rootContext = trace.setSpan(context.active(), rootSpan);
@@ -176,6 +199,9 @@ export function registerHooks(
         const sessionKey = ctx?.sessionKey || "unknown";
         const agentId = ctx?.agentId || "unknown";
 
+        // Tool input is available in event.input for security checks
+        const toolInput = event?.input || event?.toolInput || event?.args || {};
+
         // Record metric
         counters.toolCalls.add(1, {
           "tool.name": toolName,
@@ -202,6 +228,24 @@ export function registerHooks(
           parentContext
         );
 
+        // ═══ SECURITY DETECTION 1 & 3: File Access & Dangerous Commands ═══
+        const securityEvent = checkToolSecurity(
+          toolName,
+          toolInput,
+          span,
+          securityCounters,
+          sessionKey,
+          agentId
+        );
+        if (securityEvent) {
+          logger.warn?.(`[otel] SECURITY: ${securityEvent.detection} - ${securityEvent.description}`);
+          // Add tool input details to span for forensics
+          if (toolInput) {
+            const inputStr = JSON.stringify(toolInput).slice(0, 1000);
+            span.setAttribute("openclaw.tool.input_preview", inputStr);
+          }
+        }
+
         // Inspect the message for result metadata
         const message = event?.message;
         if (message) {
@@ -218,10 +262,11 @@ export function registerHooks(
           if (message?.is_error === true || message?.isError === true) {
             counters.toolErrors.add(1, { "tool.name": toolName });
             span.setStatus({ code: SpanStatusCode.ERROR, message: "Tool execution error" });
-          } else {
+          } else if (!securityEvent) {
+            // Only set OK status if no security event
             span.setStatus({ code: SpanStatusCode.OK });
           }
-        } else {
+        } else if (!securityEvent) {
           span.setStatus({ code: SpanStatusCode.OK });
         }
 
