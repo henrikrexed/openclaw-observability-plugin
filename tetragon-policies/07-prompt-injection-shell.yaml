@@ -1,0 +1,73 @@
+# Detect potential prompt injection attacks that reach shell execution
+# Complements plugin Detection 2: Prompt Injection
+# 
+# This catches cases where prompt injection successfully manipulates
+# the agent into executing shell commands with suspicious content.
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: openclaw-prompt-injection-shell
+spec:
+  kprobes:
+    - call: "sys_execve"
+      syscall: true
+      args:
+        - index: 0
+          type: "string"
+        - index: 1
+          type: "string"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/node"
+                - "/usr/local/bin/node"
+          matchArgs:
+            # Catch commands that pipe to shell (common in prompt injection)
+            - index: 1
+              operator: "Contains"
+              values:
+                - "| bash"
+                - "| sh"
+                - "| /bin/bash"
+                - "| /bin/sh"
+                - "|bash"
+                - "|sh"
+                # Base64 decode + execute (obfuscation technique)
+                - "base64 -d"
+                - "base64 --decode"
+                # Download and execute
+                - "curl -s"
+                - "wget -q"
+          matchActions:
+            - action: Post
+
+    # Catch reverse shell patterns
+    - call: "sys_execve"
+      syscall: true
+      args:
+        - index: 0
+          type: "string"
+        - index: 1
+          type: "string"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/bash"
+                - "/bin/bash"
+                - "/usr/bin/sh"
+                - "/bin/sh"
+          matchArgs:
+            - index: 1
+              operator: "Contains"
+              values:
+                # Reverse shell indicators
+                - "/dev/tcp/"
+                - "/dev/udp/"
+                - "nc -e"
+                - "ncat -e"
+                - "bash -i"
+                - "0<&196"
+          matchActions:
+            - action: Post

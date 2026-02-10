@@ -117,6 +117,22 @@ Works with any OTLP-compatible backend:
 - [Limitations](limitations.md) — Known constraints
 - [Telemetry Reference](telemetry/) — Metric/trace details
 
+### Security Monitoring
+
+- [Security Detection](security/detection.md) — Real-time threat detection
+- [Tetragon Integration](security/tetragon.md) — Kernel-level monitoring
+
+The plugin includes **real-time security detection** for:
+
+| Detection | Severity | What It Catches |
+|-----------|----------|-----------------|
+| Sensitive File Access | Critical | Credentials, SSH keys, .env files |
+| Prompt Injection | High | Social engineering attacks on the AI |
+| Dangerous Commands | Critical | Data exfiltration, rm -rf, crypto mining |
+| Token Spike Anomaly | Warning | Unusual usage patterns |
+
+Combined with Tetragon kernel monitoring, this provides defense-in-depth security observability.
+
 ## Source
 
 - Official plugin: Built into OpenClaw v2026.2.0+

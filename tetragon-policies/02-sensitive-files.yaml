@@ -1,4 +1,5 @@
-# Detect access to sensitive files (rate limited)
+# Detect access to sensitive files
+# Aligned with plugin Detection 1: Sensitive File Access
 apiVersion: cilium.io/v1alpha1
 kind: TracingPolicy
 metadata:
@@ -11,6 +12,64 @@ spec:
         - index: 0
           type: "file"
       selectors:
+        # Monitor Node.js processes (OpenClaw gateway)
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/node"
+                - "/usr/local/bin/node"
+                - "/home/hrexed/.nvm/versions/node/v22.22.0/bin/node"
+          matchArgs:
+            - index: 0
+              operator: "Prefix"
+              values:
+                # System credentials
+                - "/etc/shadow"
+                - "/etc/sudoers"
+                - "/etc/passwd"
+                
+                # SSH keys and config
+                - "/root/.ssh/"
+                - ".ssh/id_rsa"
+                - ".ssh/id_ed25519"
+                - ".ssh/id_ecdsa"
+                - ".ssh/authorized_keys"
+                - ".ssh/known_hosts"
+                - ".ssh/config"
+                
+                # Cloud provider credentials
+                - ".aws/credentials"
+                - ".aws/config"
+                - ".azure/"
+                - ".config/gcloud/"
+                - ".kube/config"
+                - ".docker/config.json"
+                
+                # OpenClaw sensitive files
+                - ".openclaw/credentials"
+                - ".openclaw/openclaw.json"
+                - "openclaw.json"
+                
+                # Environment files
+                - ".env"
+                - ".env.local"
+                - ".env.production"
+                
+                # Database credentials
+                - ".pgpass"
+                - ".my.cnf"
+                - ".netrc"
+                
+          matchActions:
+            - action: Post
+              
+    # Also catch read() syscalls on sensitive paths
+    - call: "sys_read"
+      syscall: true
+      args:
+        - index: 0
+          type: "fd"
+      selectors:
         - matchBinaries:
             - operator: "In"
               values:
@@ -21,13 +80,7 @@ spec:
               operator: "Prefix"
               values:
                 - "/etc/shadow"
-                - "/etc/sudoers"
-                - "/root/.ssh/"
                 - ".ssh/id_"
-                - ".ssh/authorized_keys"
-                - ".aws/credentials"
-                - ".kube/config"
-                - ".config/gcloud/"
-                - ".openclaw/credentials/"
+                - ".env"
           matchActions:
             - action: Post
