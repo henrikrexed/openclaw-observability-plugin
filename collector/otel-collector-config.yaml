@@ -35,6 +35,50 @@ receivers:
       network:
 
   # ─────────────────────────────────────────────────────────────────────────────
+  # OpenClaw Gateway Logs - application logs from the gateway
+  # ─────────────────────────────────────────────────────────────────────────────
+  filelog/openclaw:
+    include:
+      - /tmp/openclaw/openclaw-*.log
+    start_at: end
+    include_file_name: true
+    include_file_path: true
+    operators:
+      # Parse OpenClaw JSON logs
+      - type: json_parser
+        parse_from: body
+        timestamp:
+          parse_from: attributes.time
+          layout: '%Y-%m-%dT%H:%M:%S.%LZ'
+      # Extract log level
+      - type: severity_parser
+        parse_from: attributes._meta.logLevelName
+        mapping:
+          debug: DEBUG
+          info: INFO
+          warn: WARN
+          error: ERROR
+          fatal: FATAL
+      # Extract logger name
+      - type: move
+        from: attributes._meta.name
+        to: attributes.logger.name
+        if: attributes._meta.name != nil
+      # Extract code location
+      - type: move
+        from: attributes._meta.path.filePath
+        to: attributes.code.filepath
+        if: attributes._meta.path != nil
+      - type: move
+        from: attributes._meta.path.fileLine
+        to: attributes.code.lineno
+        if: attributes._meta.path != nil
+      - type: move
+        from: attributes._meta.path.method
+        to: attributes.code.function
+        if: attributes._meta.path != nil
+
+  # ─────────────────────────────────────────────────────────────────────────────
   # Tetragon Security Events - kernel-level security monitoring
   # Requires Tetragon installed with TracingPolicies from tetragon-policies/
   # ─────────────────────────────────────────────────────────────────────────────
@@ -59,6 +103,14 @@ processors:
     detectors: ["system"]
     system:
       hostname_sources: ["os"]
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Cumulative to Delta - Dynatrace requires delta temporality for counters
+  # ─────────────────────────────────────────────────────────────────────────────
+  cumulativetodelta:
+    include:
+      match_type: ""
+    max_stale: 300s
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Batching - improves export efficiency
@@ -160,12 +212,12 @@ service:
     # ── OpenClaw + Host Metrics ──
     metrics:
       receivers: [otlp, hostmetrics]
-      processors: [resourcedetection/system, resource/openclaw, batch]
+      processors: [resourcedetection/system, resource/openclaw, cumulativetodelta, batch]
       exporters: [otlphttp/dynatrace, debug]
 
-    # ── OpenClaw Application Logs ──
+    # ── OpenClaw Application Logs (OTLP + filelog) ──
     logs/openclaw:
-      receivers: [otlp]
+      receivers: [otlp, filelog/openclaw]
       processors: [resourcedetection/system, resource/openclaw, batch]
       exporters: [otlphttp/dynatrace, debug]
 
