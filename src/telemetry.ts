@@ -233,10 +233,43 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     }),
   };
 
+  // ── Periodic Metric Heartbeat ─────────────────────────────────
+  // OTel counters only emit data points when .add() is called.
+  // To maintain continuous timeseries (important for Dynatrace),
+  // we periodically emit zero-value data points on all counters.
+  // This ensures metrics always have data, even during idle periods.
+
+  const metricHeartbeatInterval = setInterval(() => {
+    try {
+      const idleAttrs = { "openclaw.idle": true };
+
+      // Core counters — emit 0 to keep timeseries alive
+      counters.llmRequests.add(0, idleAttrs);
+      counters.llmErrors.add(0, idleAttrs);
+      counters.tokensTotal.add(0, idleAttrs);
+      counters.tokensPrompt.add(0, idleAttrs);
+      counters.tokensCompletion.add(0, idleAttrs);
+      counters.toolCalls.add(0, idleAttrs);
+      counters.toolErrors.add(0, idleAttrs);
+      counters.messagesReceived.add(0, idleAttrs);
+      counters.messagesSent.add(0, idleAttrs);
+      counters.sessionResets.add(0, idleAttrs);
+
+      // Security counters
+      counters.securityEvents.add(0, idleAttrs);
+      counters.sensitiveFileAccess.add(0, idleAttrs);
+      counters.promptInjection.add(0, idleAttrs);
+      counters.dangerousCommand.add(0, idleAttrs);
+    } catch {
+      // Never let metric heartbeat errors affect the gateway
+    }
+  }, config.metricsIntervalMs || 30_000); // Match the export interval
+
   // ── Shutdown ────────────────────────────────────────────────────
 
   const shutdown = async () => {
     logger.info("[otel] Shutting down telemetry...");
+    clearInterval(metricHeartbeatInterval);
     try {
       if (tracerProvider) await tracerProvider.shutdown();
       if (meterProvider) await meterProvider.shutdown();
