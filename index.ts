@@ -54,6 +54,21 @@ const otelObservabilityPlugin = {
     let telemetry: TelemetryRuntime | null = null;
     let unsubscribeDiagnostics: (() => void) | null = null;
 
+    // ── Init telemetry + hooks at top level ─────────────────────────
+    // MUST happen in register() (not inside registerService.start())
+    // because registerService is a no-op in embedded runner contexts.
+    // Hooks registered here will fire in both gateway and runner processes;
+    // hooks registered inside registerService.start() only fire in gateway.
+    // See: api-builder.ts noopRegisterService
+    try {
+      telemetry = initTelemetry(config, logger);
+      logger.info("[otel] Telemetry initialized in register() (universal context)");
+      registerHooks(api, telemetry, config);
+      logger.info("[otel] Hooks registered at top level (runner-compatible)");
+    } catch (err) {
+      logger.error(`[otel] Failed to initialize telemetry at register() time: ${err}`);
+    }
+
     // ── RPC: status endpoint ────────────────────────────────────────
 
     api.registerGatewayMethod(
@@ -105,30 +120,26 @@ const otelObservabilityPlugin = {
       id: "otel-observability",
 
       start: async () => {
-        logger.info("[otel] Starting OpenTelemetry observability...");
+        logger.info("[otel] Starting OpenTelemetry observability (gateway-only init)...");
 
-        // 1. Initialize our OTel providers FIRST (traces + metrics)
-        //    This registers our TracerProvider as global, so all spans
-        //    (including GenAI wraps) export through our pipeline.
-        telemetry = initTelemetry(config, logger);
+        // Telemetry + hooks were already initialized at register() time so
+        // they work in both gateway and runner contexts. Here we only do
+        // gateway-specific steps that don't need to run in the runner.
 
-        // 2. Wrap LLM SDKs AFTER provider is registered
-        //    The wraps use trace.getTracer() which goes through our provider.
+        // Gateway-only: OpenLLMetry SDK wrap detection (no-op without NODE_OPTIONS preload)
         if (config.traces) {
           await initOpenLLMetry(config, logger);
         }
 
-        // 3. Register hooks for tool results and command events
-        registerHooks(api, telemetry, config);
-
-        // 4. Subscribe to OpenClaw diagnostic events (model.usage, etc.)
-        //    This gives us cost data and accurate token counts
-        unsubscribeDiagnostics = await registerDiagnosticsListener(telemetry, logger);
-        if (hasDiagnosticsSupport()) {
-          logger.info("[otel] ✅ Integrated with OpenClaw diagnostics (cost tracking enabled)");
+        // Gateway-only: subscribe to diagnostic events (emitted from gateway process)
+        if (telemetry) {
+          unsubscribeDiagnostics = await registerDiagnosticsListener(telemetry, logger);
+          if (hasDiagnosticsSupport()) {
+            logger.info("[otel] ✅ Integrated with OpenClaw diagnostics (cost tracking enabled)");
+          }
         }
 
-        logger.info("[otel] ✅ Observability pipeline active");
+        logger.info("[otel] ✅ Observability pipeline active (gateway-side)");
         logger.info(
           `[otel]   Traces=${config.traces} Metrics=${config.metrics} Logs=${config.logs}`
         );
