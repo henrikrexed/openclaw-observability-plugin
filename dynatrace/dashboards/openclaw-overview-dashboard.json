@@ -10,7 +10,7 @@
     "1": {
       "type": "data",
       "title": "Total Agents Active",
-      "query": "timeseries count = count(gen_ai.client.operation.duration), by:{gen_ai.agent.name}\n| summarize agents = countDistinct(gen_ai.agent.name)",
+      "query": "timeseries rs = count(paperclip.agent.runs.started), by:{agent_name}\n| summarize agents = countDistinct(agent_name)",
       "queryConfig": {
         "additionalFilters": {},
         "version": "4.3.1",
@@ -208,7 +208,7 @@
     "19": {
       "type": "data",
       "title": "Issue Completion Rate",
-      "query": "timeseries {\n  done = avg(paperclip.issues.count, filter: { status == \"done\" }, default: 0),\n  total = avg(paperclip.issues.count, default: 0)\n}\n| fieldsAdd completion_rate = 100 * done[] / (total[] + 0.000001)",
+      "query": "timeseries {\n  done = sum(paperclip.issues.count, filter: { status == \"done\" }, default: 0),\n  total = sum(paperclip.issues.count, default: 0)\n}\n| fieldsAdd completion_rate = 100 * done[] / (total[] + 0.000001)",
       "visualization": "lineChart",
       "visualizationSettings": {
         "chartSettings": {
