@@ -158,11 +158,14 @@ processors:
           - set(attributes["tetragon.function"], attributes["process_kprobe"]["function_name"]) where attributes["process_kprobe"]["function_name"] != nil
           
           # ── Assign security risk levels based on policy ──
-          - set(attributes["security.risk"], "critical") where attributes["tetragon.policy"] == "openclaw-privilege-escalation"
-          - set(attributes["security.risk"], "critical") where attributes["tetragon.policy"] == "openclaw-kernel-modules"
-          - set(attributes["security.risk"], "high") where attributes["tetragon.policy"] == "openclaw-sensitive-files"
-          - set(attributes["security.risk"], "high") where attributes["tetragon.policy"] == "openclaw-dangerous-commands"
-          - set(attributes["security.risk"], "low") where attributes["tetragon.policy"] == "openclaw-process-exec"
+          # Legacy openclaw-* policy names kept for back-compat; new paperclip-*
+          # policy names emit identical attributes. Keep both until all deployed
+          # Tetragon instances are updated to paperclip- naming.
+          - set(attributes["security.risk"], "critical") where attributes["tetragon.policy"] == "openclaw-privilege-escalation" or attributes["tetragon.policy"] == "paperclip-privilege-escalation"
+          - set(attributes["security.risk"], "critical") where attributes["tetragon.policy"] == "openclaw-kernel-modules" or attributes["tetragon.policy"] == "paperclip-kernel-modules"
+          - set(attributes["security.risk"], "high") where attributes["tetragon.policy"] == "openclaw-sensitive-files" or attributes["tetragon.policy"] == "paperclip-sensitive-files"
+          - set(attributes["security.risk"], "high") where attributes["tetragon.policy"] == "openclaw-dangerous-commands" or attributes["tetragon.policy"] == "paperclip-dangerous-commands"
+          - set(attributes["security.risk"], "low") where attributes["tetragon.policy"] == "openclaw-process-exec" or attributes["tetragon.policy"] == "paperclip-process-exec"
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Resource attributes for Tetragon security events
@@ -175,7 +178,7 @@ processors:
   resource/tetragon:
     attributes:
       - key: service.name
-        value: "openclaw-security"
+        value: "paperclip-security"
         action: upsert
       - key: tetragon.version
         value: "1.6.0"

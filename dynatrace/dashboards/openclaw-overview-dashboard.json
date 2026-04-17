@@ -281,7 +281,7 @@
     "24": {
       "type": "data",
       "title": "Security Events",
-      "query": "timeseries {\n  file_access = sum(openclaw.security.sensitive_file_access),\n  injection = sum(openclaw.security.prompt_injection),\n  dangerous_cmd = sum(openclaw.security.dangerous_command)\n}",
+      "query": "timeseries {\n  file_access = sum(paperclip.security.sensitive_file_access),\n  injection = sum(paperclip.security.prompt_injection),\n  dangerous_cmd = sum(paperclip.security.dangerous_command)\n}",
       "visualization": "lineChart",
       "visualizationSettings": {
         "chartSettings": {
@@ -293,7 +293,7 @@
     "25": {
       "type": "data",
       "title": "Recent Security Incidents",
-      "query": "fetch spans\n| filter security.event.detected == true\n| fields timestamp, security.event.detection, security.event.severity, security.event.description, openclaw.session.key\n| sort timestamp desc\n| limit 20",
+      "query": "fetch spans\n| filter span.name == \"paperclip.security.event\"\n| filter paperclip.security.event.detected == true\n| fields timestamp, paperclip.security.event.detection, paperclip.security.event.severity, paperclip.security.event.description, paperclip.agent.id, paperclip.run.id\n| sort timestamp desc\n| limit 20",
       "visualization": "table"
     }
   },
