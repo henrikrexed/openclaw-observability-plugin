@@ -15,8 +15,9 @@ Pre-built Dynatrace dashboard JSON for monitoring OpenClaw AI agent operations.
 | 3 | **Cost by Agent** | `paperclip.cost.cents` (cents, divide by 100 for USD) by agent/model | Bar + area charts |
 | 4 | **Agent Performance** | `gen_ai.client.operation.duration` by provider | Line charts |
 | 5 | **Issue Flow** | `paperclip.issues.count` by status, completion rate | Area + line charts |
+| 6 | **Budget Utilization** | `paperclip.budget.utilization` by agent, plus status table joining with `paperclip.cost.cents` | Line chart + table |
 
-> Budget utilization tiles were descoped under ISI-557. The `paperclip.budget.utilization` gauge is emitted correctly by the plugin but no agents currently have `budgetMonthlyCents > 0`, so no time-series data exists. Tiles will be restored under ISI-572 once agent monthly budgets are configured.
+> Budget status table (tile 22) joins `paperclip.budget.utilization` (has `agent_name`) with `paperclip.cost.cents` (only has `agent_id` — `agent_name="unknown"`) on `agent_id` via `leftOuter` join. When the cost-metric emit adds `agent_name` natively this tile can be simplified.
 
 ### Import
 

@@ -215,6 +215,41 @@
           "leftYAxisSettings": { "label": "Completion %" }
         }
       }
+    },
+    "20": {
+      "type": "markdown",
+      "title": "",
+      "content": "## 💸 Budget Utilization"
+    },
+    "21": {
+      "type": "data",
+      "title": "Budget Utilization by Agent",
+      "query": "timeseries utilization = avg(paperclip.budget.utilization), by:{agent_name}",
+      "visualization": "lineChart",
+      "visualizationSettings": {
+        "chartSettings": {
+          "legend": { "position": "bottom" },
+          "leftYAxisSettings": { "label": "Utilization %" }
+        },
+        "thresholds": [
+          { "field": "utilization", "isEnabled": true, "rules": [
+            { "color": { "Default": "#7dc540" }, "comparator": "≥", "value": 0 },
+            { "color": { "Default": "#f5d30f" }, "comparator": "≥", "value": 80 },
+            { "color": { "Default": "#dc172a" }, "comparator": "≥", "value": 100 }
+          ]}
+        ]
+      }
+    },
+    "22": {
+      "type": "data",
+      "title": "Budget Status Table",
+      "query": "timeseries util_ts = avg(paperclip.budget.utilization, default: 0), by:{agent_id, agent_name}\n| fieldsAdd util_avg = arrayAvg(util_ts)\n| join [\n    timeseries cost_ts = sum(paperclip.cost.cents, default: 0), by:{agent_id}\n    | fieldsAdd cost_total = arraySum(cost_ts)\n  ], kind: leftOuter, on: { agent_id }, prefix: \"r_\"\n| fieldsAdd cost_usd_total = r_cost_total / 100\n| fieldsAdd status = if(util_avg >= 100, \"🔴 Paused\", else: if(util_avg >= 80, \"🟡 Warning\", else: \"🟢 OK\"))\n| fields agent_name, util_avg, cost_usd_total, status",
+      "visualization": "table",
+      "visualizationSettings": {
+        "table": {
+          "enableLineWrap": true
+        }
+      }
     }
   },
   "layouts": {
@@ -235,6 +270,9 @@
     "14": { "x": 12, "y": 26, "w": 12, "h": 6 },
     "17": { "x": 0, "y": 32, "w": 24, "h": 1 },
     "18": { "x": 0, "y": 33, "w": 14, "h": 6 },
-    "19": { "x": 14, "y": 33, "w": 10, "h": 6 }
+    "19": { "x": 14, "y": 33, "w": 10, "h": 6 },
+    "20": { "x": 0, "y": 39, "w": 24, "h": 1 },
+    "21": { "x": 0, "y": 40, "w": 14, "h": 6 },
+    "22": { "x": 14, "y": 40, "w": 10, "h": 6 }
   }
 }
