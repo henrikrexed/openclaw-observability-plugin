@@ -33,7 +33,7 @@
     "2": {
       "type": "data",
       "title": "Monthly Token Cost (USD)",
-      "query": "timeseries cost = sum(openclaw.llm.cost_usd)\n| summarize total_cost = sum(cost)\n| fieldsAdd total_cost = round(total_cost, decimals: 2)",
+      "query": "timeseries cost = sum(paperclip.cost.cents)\n| fieldsAdd cost_sum = arraySum(cost)\n| summarize total_cents = sum(cost_sum)\n| fieldsAdd total_cost = round(total_cents / 100, decimals: 2)\n| fields total_cost",
       "subType": "singleValue",
       "visualization": "singleValue",
       "visualizationSettings": {
@@ -55,7 +55,7 @@
     "3": {
       "type": "data",
       "title": "Avg Agent Health Score",
-      "query": "timeseries avg_health = avg(paperclip.agent.health.score), by:{agent_name}\n| summarize overall = avg(avg_health)",
+      "query": "timeseries avg_health = avg(paperclip.agent.health.score), by:{agent_name}\n| fieldsAdd agent_avg = arrayAvg(avg_health)\n| summarize overall = avg(agent_avg)",
       "subType": "singleValue",
       "visualization": "singleValue",
       "visualizationSettings": {
@@ -76,7 +76,7 @@
     "4": {
       "type": "data",
       "title": "Active Issues",
-      "query": "timeseries issues = avg(paperclip.issues.count), by:{status}\n| summarize total = sum(issues)",
+      "query": "timeseries issues = avg(paperclip.issues.count), by:{status}\n| fieldsAdd latest = arrayLast(issues)\n| summarize total = sum(latest)",
       "subType": "singleValue",
       "visualization": "singleValue",
       "visualizationSettings": {
@@ -111,7 +111,7 @@
     "7": {
       "type": "data",
       "title": "Token Usage Over Time (Input vs Output)",
-      "query": "timeseries {\n  input_tokens = sum(gen_ai.client.token.usage, {gen_ai.token.type=\"input\"}),\n  output_tokens = sum(gen_ai.client.token.usage, {gen_ai.token.type=\"output\"})\n}",
+      "query": "timeseries {\n  input_tokens = sum(gen_ai.client.token.usage, filter: { gen_ai.token.type == \"input\" }, default: 0),\n  output_tokens = sum(gen_ai.client.token.usage, filter: { gen_ai.token.type == \"output\" }, default: 0)\n}",
       "visualization": "lineChart",
       "visualizationSettings": {
         "chartSettings": {
@@ -123,7 +123,7 @@
     "8": {
       "type": "data",
       "title": "Cache Hit Rate",
-      "query": "timeseries {\n  cache_read = sum(gen_ai.client.token.usage, {gen_ai.token.type=\"cache_read\"}),\n  input = sum(gen_ai.client.token.usage, {gen_ai.token.type=\"input\"})\n}\n| fieldsAdd cache_rate = if(input > 0, 100 * cache_read / input, 0)",
+      "query": "timeseries {\n  cache_read = sum(gen_ai.client.token.usage, filter: { gen_ai.token.type == \"cache_read\" }, default: 0),\n  input = sum(gen_ai.client.token.usage, filter: { gen_ai.token.type == \"input\" }, default: 0)\n}\n| fieldsAdd cache_rate = 100 * cache_read[] / (input[] + 0.000001)",
       "visualization": "lineChart",
       "visualizationSettings": {
         "chartSettings": {
@@ -139,7 +139,7 @@
     "10": {
       "type": "data",
       "title": "Cost by Agent (USD)",
-      "query": "timeseries cost = sum(paperclip.cost.cents), by:{agent_id, model}\n| fieldsAdd cost_usd = cost / 100",
+      "query": "timeseries cost = sum(paperclip.cost.cents), by:{agent_id, model}\n| fieldsAdd cost_usd = cost[] / 100",
       "visualization": "barChart",
       "visualizationSettings": {
         "chartSettings": {
@@ -151,7 +151,7 @@
     "11": {
       "type": "data",
       "title": "Cost Trend — Last 30 Days",
-      "query": "timeseries cost = sum(openclaw.llm.cost_usd), by:{gen_ai.response.model}\n| fieldsAdd cumulative = running_sum(cost)",
+      "query": "timeseries cost_cents = sum(paperclip.cost.cents), by:{model}\n| fieldsAdd cost_usd = cost_cents[] / 100\n| fieldsAdd cumulative = arrayCumulativeSum(cost_usd)",
       "visualization": "areaChart",
       "visualizationSettings": {
         "chartSettings": {
@@ -180,35 +180,13 @@
     "14": {
       "type": "data",
       "title": "P95 Operation Duration",
-      "query": "timeseries p95 = percentile(gen_ai.client.operation.duration, 95), by:{gen_ai.provider.name}",
+      "query": "timeseries p95 = percentile(gen_ai.client.operation.duration, 95), by:{gen_ai.provider.name}, rollup: avg",
       "visualization": "lineChart",
       "visualizationSettings": {
         "chartSettings": {
           "leftYAxisSettings": { "label": "P95 Duration (s)" }
         }
       }
-    },
-    "15": {
-      "type": "data",
-      "title": "Tool Call Frequency",
-      "query": "fetch spans\n| filter matchesPhrase(span.name, \"tool.\")\n| summarize calls = count(), by:{span.name}\n| sort calls desc\n| limit 20",
-      "visualization": "barChart",
-      "visualizationSettings": {
-        "chartSettings": {
-          "categoricalBarChartSettings": {
-            "categoryAxis": "span.name",
-            "categoryAxisLabel": "Tool",
-            "valueAxis": "calls",
-            "valueAxisLabel": "Call Count"
-          }
-        }
-      }
-    },
-    "16": {
-      "type": "data",
-      "title": "Avg Tool Duration (Top 10)",
-      "query": "fetch spans\n| filter matchesPhrase(span.name, \"tool.\")\n| summarize avg_ms = avg(duration / 1000000), by:{span.name}\n| sort avg_ms desc\n| limit 10",
-      "visualization": "barChart"
     },
     "17": {
       "type": "markdown",
@@ -230,7 +208,7 @@
     "19": {
       "type": "data",
       "title": "Issue Completion Rate",
-      "query": "timeseries {\n  done = avg(paperclip.issues.count, {status=\"done\"}),\n  total = avg(paperclip.issues.count)\n}\n| fieldsAdd completion_rate = if(total > 0, 100 * done / total, 0)",
+      "query": "timeseries {\n  done = avg(paperclip.issues.count, filter: { status == \"done\" }, default: 0),\n  total = avg(paperclip.issues.count, default: 0)\n}\n| fieldsAdd completion_rate = 100 * done[] / (total[] + 0.000001)",
       "visualization": "lineChart",
       "visualizationSettings": {
         "chartSettings": {
@@ -265,36 +243,13 @@
     "22": {
       "type": "data",
       "title": "Budget Status Table",
-      "query": "timeseries {\n  util = avg(paperclip.budget.utilization),\n  cost = sum(paperclip.cost.cents)\n}, by:{agent_name}\n| fieldsAdd cost_usd = cost / 100\n| fieldsAdd status = if(util >= 100, \"🔴 Paused\", if(util >= 80, \"🟡 Warning\", \"🟢 OK\"))",
+      "query": "timeseries {\n  util = avg(paperclip.budget.utilization, default: 0),\n  cost = sum(paperclip.cost.cents, default: 0)\n}, by:{agent_name}\n| fieldsAdd util_avg = arrayAvg(util), cost_usd_total = arraySum(cost) / 100\n| fieldsAdd status = if(util_avg >= 100, \"🔴 Paused\", else: if(util_avg >= 80, \"🟡 Warning\", else: \"🟢 OK\"))\n| fields agent_name, util_avg, cost_usd_total, status",
       "visualization": "table",
       "visualizationSettings": {
         "table": {
           "enableLineWrap": true
         }
       }
-    },
-    "23": {
-      "type": "markdown",
-      "title": "",
-      "content": "## 🔒 Security Overview"
-    },
-    "24": {
-      "type": "data",
-      "title": "Security Events",
-      "query": "timeseries {\n  file_access = sum(openclaw.security.sensitive_file_access),\n  injection = sum(openclaw.security.prompt_injection),\n  dangerous_cmd = sum(openclaw.security.dangerous_command)\n}",
-      "visualization": "lineChart",
-      "visualizationSettings": {
-        "chartSettings": {
-          "legend": { "position": "bottom" },
-          "leftYAxisSettings": { "label": "Events" }
-        }
-      }
-    },
-    "25": {
-      "type": "data",
-      "title": "Recent Security Incidents",
-      "query": "fetch spans\n| filter security.event.detected == true\n| fields timestamp, security.event.detection, security.event.severity, security.event.description, openclaw.session.key\n| sort timestamp desc\n| limit 20",
-      "visualization": "table"
     }
   },
   "layouts": {
@@ -313,16 +268,11 @@
     "12": { "x": 0, "y": 25, "w": 24, "h": 1 },
     "13": { "x": 0, "y": 26, "w": 12, "h": 6 },
     "14": { "x": 12, "y": 26, "w": 12, "h": 6 },
-    "15": { "x": 0, "y": 32, "w": 12, "h": 6 },
-    "16": { "x": 12, "y": 32, "w": 12, "h": 6 },
-    "17": { "x": 0, "y": 38, "w": 24, "h": 1 },
-    "18": { "x": 0, "y": 39, "w": 14, "h": 6 },
-    "19": { "x": 14, "y": 39, "w": 10, "h": 6 },
-    "20": { "x": 0, "y": 45, "w": 24, "h": 1 },
-    "21": { "x": 0, "y": 46, "w": 14, "h": 6 },
-    "22": { "x": 14, "y": 46, "w": 10, "h": 6 },
-    "23": { "x": 0, "y": 52, "w": 24, "h": 1 },
-    "24": { "x": 0, "y": 53, "w": 14, "h": 6 },
-    "25": { "x": 14, "y": 53, "w": 10, "h": 6 }
+    "17": { "x": 0, "y": 32, "w": 24, "h": 1 },
+    "18": { "x": 0, "y": 33, "w": 14, "h": 6 },
+    "19": { "x": 14, "y": 33, "w": 10, "h": 6 },
+    "20": { "x": 0, "y": 39, "w": 24, "h": 1 },
+    "21": { "x": 0, "y": 40, "w": 14, "h": 6 },
+    "22": { "x": 14, "y": 40, "w": 10, "h": 6 }
   }
 }

@@ -12,11 +12,10 @@ Pre-built Dynatrace dashboard JSON for monitoring OpenClaw AI agent operations.
 |---|---------|-------------|---------------|
 | 1 | **Overview** | Agent count, monthly cost, health score, active issues | Single value tiles |
 | 2 | **Token Usage** | `gen_ai.client.token.usage` by model/type, cache hit rate | Bar + line charts |
-| 3 | **Cost by Agent** | `paperclip.cost.cents`, `openclaw.llm.cost_usd` by agent/model | Bar + area charts |
-| 4 | **Agent Performance** | `gen_ai.client.operation.duration` by provider, tool call frequency | Line + bar charts |
+| 3 | **Cost by Agent** | `paperclip.cost.cents` (cents, divide by 100 for USD) by agent/model | Bar + area charts |
+| 4 | **Agent Performance** | `gen_ai.client.operation.duration` by provider | Line charts |
 | 5 | **Issue Flow** | `paperclip.issues.count` by status, completion rate | Area + line charts |
 | 6 | **Budget Utilization** | `paperclip.budget.utilization` by agent, status table | Line chart + table |
-| 7 | **Security** | `openclaw.security.*` events, recent incidents from spans | Line chart + table |
 
 ### Import
 
@@ -26,20 +25,22 @@ Pre-built Dynatrace dashboard JSON for monitoring OpenClaw AI agent operations.
 
 ### Prerequisites
 
-- OpenClaw custom plugin or official diagnostics-otel enabled
+- `@paperclipai/plugin-paperclip-observability` loaded in the agent runtime
 - OTel Collector forwarding to Dynatrace OTLP endpoint
-- For Paperclip metrics: Paperclip control plane exporting metrics
-- For security tiles: Tetragon + security detection module active
 
 ### Metric Sources
 
 | Metric | Source |
 |--------|--------|
-| `gen_ai.client.token.usage` | Custom plugin (agent_end hook) |
-| `gen_ai.client.operation.duration` | Custom plugin (agent turns) |
-| `openclaw.llm.cost_usd` | Diagnostics API integration |
-| `openclaw.security.*` | Security detection module |
-| `paperclip.*` | Paperclip control plane |
+| `gen_ai.client.token.usage` (histogram) | paperclip-observability plugin — GenAI semconv emit |
+| `gen_ai.client.operation.duration` (histogram) | paperclip-observability plugin — GenAI semconv emit |
+| `paperclip.cost.cents` | paperclip-observability plugin (unit: cents) |
+| `paperclip.tokens.input`, `paperclip.tokens.output` | paperclip-observability plugin |
+| `paperclip.agent.health.score`, `paperclip.issues.count`, `paperclip.budget.*` | paperclip control plane |
+
+> Tool-call tiles (span.name `tool.*`) and Security tiles (`openclaw.security.*`, Tetragon-detected incidents) are tracked as follow-up work — see [ISI-567](https://app.paperclip.ing/ISI/issues/ISI-567) (tool-call tracing) and [ISI-568](https://app.paperclip.ing/ISI/issues/ISI-568) (security port). They will be added back once the plugin-side emit surfaces land.
+
+> Cache hit rate tile depends on `gen_ai.token.type == "cache_read"` histogram dimension — pending plugin PR.
 
 ### Customization
 
