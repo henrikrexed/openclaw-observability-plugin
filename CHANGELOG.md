@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Changed
 
 - **Hook migration (ISI-730).** Replaced the legacy `before_agent_start` hook
-  registration with the phase-specific hooks introduced in OpenClaw 2026.2:
+  registration with the phase-specific hooks introduced in OpenClaw 2026.4.21:
   - `before_model_resolve` — creates the `openclaw.agent.turn` span at the
     earliest point in the agent run. Agent-identity attributes
     (`gen_ai.agent.id`, `gen_ai.conversation.id`, `openclaw.agent.id`,
@@ -48,13 +48,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Removed
 
 - `before_agent_start` hook registration. The plugin no longer listens to
-  this legacy hook. If you run this version against OpenClaw &lt; 2026.2,
+  this legacy hook. If you run this version against OpenClaw &lt; 2026.4.21,
   the agent turn span will not be created. Pin to `0.1.x` if you still
   need the legacy path.
 
 ### Added
 
-- `minOpenClawVersion: 2026.2.0` in `openclaw.plugin.json`.
+- `minOpenClawVersion: 2026.4.21` in `openclaw.plugin.json`.
 - Regression tests for hook wiring (`tests/hooks.test.ts`).
 - `instrumentation/capture-content.mjs` exports `resolveCaptureContent(env)`
   and the `CAPTURE_CONTENT_ENV` constant, consumed by the preload and

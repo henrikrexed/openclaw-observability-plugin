@@ -3,7 +3,7 @@
   "name": "OpenTelemetry Observability",
   "description": "Traces, metrics, and logs for OpenClaw using OpenLLMetry and OpenTelemetry",
   "version": "0.2.0",
-  "minOpenClawVersion": "2026.2.0",
+  "minOpenClawVersion": "2026.4.21",
   "uiHints": {
     "endpoint": {
       "label": "OTLP Endpoint",
