@@ -1,0 +1,252 @@
+/**
+ * Tests for the log export pipeline (ISI-930: Sprint 7).
+ *
+ * Covers:
+ *   - Log filtering/exclusion rules for noisy logs
+ *   - Log config parsing from raw input
+ *   - Log pipeline disabled when config.logs = false
+ */
+
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  initLogPipeline,
+  parseLogConfig,
+  shouldExclude,
+  type LogEvent,
+  type LogPipelineConfig,
+} from "../src/logs.js";
+import type { OtelObservabilityConfig } from "../src/config.js";
+
+function createConfig(overrides: Partial<OtelObservabilityConfig> = {}): OtelObservabilityConfig {
+  return {
+    endpoint: "http://localhost:4318",
+    protocol: "http",
+    serviceName: "test-gateway",
+    headers: {},
+    traces: true,
+    metrics: true,
+    logs: true,
+    captureContent: false,
+    metricsIntervalMs: 30_000,
+    resourceAttributes: {},
+    ...overrides,
+  };
+}
+
+function createLogEvent(overrides: Partial<LogEvent> = {}): LogEvent {
+  return {
+    type: "log.record",
+    level: "info",
+    message: "test log message",
+    logger: "test-logger",
+    function: "handleRequest",
+    file: "server.ts",
+    line: 42,
+    sessionKey: "session-123",
+    agentId: "agent-456",
+    timestamp: Date.now(),
+    ...overrides,
+  };
+}
+
+describe("log pipeline initialization (ISI-930)", () => {
+  it("returns null when logs are disabled in config", () => {
+    const config = createConfig({ logs: false });
+    const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const pipeline = initLogPipeline(config, logger);
+    expect(pipeline).toBeNull();
+    expect(logger.info).toHaveBeenCalledWith(
+      "[otel-logs] Log export disabled in config"
+    );
+  });
+});
+
+describe("log filtering/exclusion (ISI-930)", () => {
+  it("excludes logs matching excluded levels", () => {
+    const config: LogPipelineConfig = {
+      enabled: true,
+      filters: [],
+      excludeLevels: ["debug", "trace"],
+      excludeLoggers: [],
+      excludeMessagePatterns: [],
+    };
+
+    expect(shouldExclude(createLogEvent({ level: "debug" }), config)).toBe(true);
+    expect(shouldExclude(createLogEvent({ level: "trace" }), config)).toBe(true);
+    expect(shouldExclude(createLogEvent({ level: "info" }), config)).toBe(false);
+  });
+
+  it("excludes logs matching excluded loggers (case-insensitive substring)", () => {
+    const config: LogPipelineConfig = {
+      enabled: true,
+      filters: [],
+      excludeLevels: [],
+      excludeLoggers: ["noisy-module", "verbose-lib"],
+      excludeMessagePatterns: [],
+    };
+
+    expect(shouldExclude(createLogEvent({ logger: "noisy-module.service" }), config)).toBe(true);
+    expect(shouldExclude(createLogEvent({ logger: "VERBOSE-LIB" }), config)).toBe(true);
+    expect(shouldExclude(createLogEvent({ logger: "important-service" }), config)).toBe(false);
+  });
+
+  it("excludes logs matching message patterns (string and regex)", () => {
+    const config: LogPipelineConfig = {
+      enabled: true,
+      filters: [],
+      excludeLevels: [],
+      excludeLoggers: [],
+      excludeMessagePatterns: ["health check", /ping/i],
+    };
+
+    expect(shouldExclude(createLogEvent({ message: "health check OK" }), config)).toBe(true);
+    expect(shouldExclude(createLogEvent({ message: "PING received" }), config)).toBe(true);
+    expect(shouldExclude(createLogEvent({ message: "processing request" }), config)).toBe(false);
+  });
+
+  it("applies filter rules with exclude action", () => {
+    const config: LogPipelineConfig = {
+      enabled: true,
+      filters: [
+        { field: "logger", pattern: "internal.", action: "exclude" },
+      ],
+      excludeLevels: [],
+      excludeLoggers: [],
+      excludeMessagePatterns: [],
+    };
+
+    expect(shouldExclude(createLogEvent({ logger: "internal.scheduler" }), config)).toBe(true);
+    expect(shouldExclude(createLogEvent({ logger: "external.api" }), config)).toBe(false);
+  });
+
+  it("applies filter rules with include action (keeps matching logs)", () => {
+    const config: LogPipelineConfig = {
+      enabled: true,
+      filters: [
+        { field: "level", pattern: "error", action: "include" },
+      ],
+      excludeLevels: [],
+      excludeLoggers: [],
+      excludeMessagePatterns: [],
+    };
+
+    expect(shouldExclude(createLogEvent({ level: "error" }), config)).toBe(false);
+    expect(shouldExclude(createLogEvent({ level: "info" }), config)).toBe(false);
+  });
+
+  it("filters by type field", () => {
+    const config: LogPipelineConfig = {
+      enabled: true,
+      filters: [
+        { field: "type", pattern: "health", action: "exclude" },
+      ],
+      excludeLevels: [],
+      excludeLoggers: [],
+      excludeMessagePatterns: [],
+    };
+
+    expect(shouldExclude(createLogEvent({ type: "health" }), config)).toBe(true);
+    expect(shouldExclude(createLogEvent({ type: "log.record" }), config)).toBe(false);
+  });
+
+  it("passes through when no filters match", () => {
+    const config: LogPipelineConfig = {
+      enabled: true,
+      filters: [],
+      excludeLevels: [],
+      excludeLoggers: [],
+      excludeMessagePatterns: [],
+    };
+
+    expect(shouldExclude(createLogEvent(), config)).toBe(false);
+  });
+
+  it("checks exclusion order: levels → loggers → patterns → filter rules", () => {
+    const config: LogPipelineConfig = {
+      enabled: true,
+      filters: [],
+      excludeLevels: ["debug"],
+      excludeLoggers: ["noisy"],
+      excludeMessagePatterns: ["skip-me"],
+    };
+
+    expect(shouldExclude(createLogEvent({ level: "debug" }), config)).toBe(true);
+    expect(shouldExclude(createLogEvent({ logger: "noisy.svc" }), config)).toBe(true);
+    expect(shouldExclude(createLogEvent({ message: "skip-me please" }), config)).toBe(true);
+    expect(shouldExclude(createLogEvent({ level: "info", logger: "ok", message: "normal" }), config)).toBe(false);
+  });
+});
+
+describe("parseLogConfig (ISI-930)", () => {
+  it("returns defaults for null input", () => {
+    const config = parseLogConfig(null);
+    expect(config.enabled).toBe(true);
+    expect(config.filters).toEqual([]);
+    expect(config.excludeLevels).toEqual([]);
+    expect(config.excludeLoggers).toEqual([]);
+    expect(config.excludeMessagePatterns).toEqual([]);
+  });
+
+  it("returns defaults for non-object input", () => {
+    const config = parseLogConfig("string");
+    expect(config.enabled).toBe(true);
+  });
+
+  it("parses excludeLevels (lowercased)", () => {
+    const config = parseLogConfig({ excludeLevels: ["DEBUG", "Trace"] });
+    expect(config.excludeLevels).toEqual(["debug", "trace"]);
+  });
+
+  it("parses excludeLoggers", () => {
+    const config = parseLogConfig({ excludeLoggers: ["noisy-lib"] });
+    expect(config.excludeLoggers).toEqual(["noisy-lib"]);
+  });
+
+  it("parses excludeMessagePatterns (string values)", () => {
+    const config = parseLogConfig({ excludeMessagePatterns: ["health"] });
+    expect(config.excludeMessagePatterns).toEqual(["health"]);
+  });
+
+  it("preserves RegExp instances in excludeMessagePatterns", () => {
+    const regex = /ping/i;
+    const config = parseLogConfig({ excludeMessagePatterns: [regex] });
+    expect(config.excludeMessagePatterns).toEqual([regex]);
+  });
+
+  it("parses valid filter rules", () => {
+    const config = parseLogConfig({
+      filters: [
+        { field: "logger", pattern: "noisy", action: "exclude" },
+        { field: "message", pattern: /skip/i, action: "exclude" },
+      ],
+    });
+    expect(config.filters.length).toBe(2);
+    expect(config.filters[0].field).toBe("logger");
+    expect(config.filters[0].action).toBe("exclude");
+    expect(config.filters[1].pattern).toEqual(/skip/i);
+  });
+
+  it("ignores invalid filter rules", () => {
+    const config = parseLogConfig({
+      filters: [
+        { field: "invalid_field", pattern: "x", action: "exclude" },
+        { field: "logger", pattern: 123, action: "exclude" },
+        { field: "logger", pattern: "ok", action: "bad_action" },
+        "not-an-object",
+        null,
+      ],
+    });
+    expect(config.filters).toEqual([]);
+  });
+
+  it("sets enabled=false when explicitly disabled", () => {
+    const config = parseLogConfig({ enabled: false });
+    expect(config.enabled).toBe(false);
+  });
+
+  it("filters out non-string values from excludeLevels", () => {
+    const config = parseLogConfig({ excludeLevels: ["debug", 42, null, "info"] });
+    expect(config.excludeLevels).toEqual(["debug", "info"]);
+  });
+});
