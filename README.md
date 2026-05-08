@@ -84,26 +84,43 @@ For **deeper observability**, install the custom plugin from this repo. It uses 
 **Connected Traces:**
 ```
 openclaw.request (root span)
+├── openclaw.session (long-lived session span)
 ├── openclaw.agent.turn
-│   ├── tool.Read (file read)
-│   ├── tool.exec (shell command)
-│   ├── tool.Write (file write)
-│   └── tool.web_search
-└── (child spans connected via trace context)
+│   ├── openclaw.dispatch.prepare
+│   ├── chat {model} (model call span, GenAI semconv)
+│   ├── execute_tool Read (tool span)
+│   ├── execute_tool Write (tool span)
+│   └── execute_tool Bash (tool span)
+└── openclaw.message.sent
 ```
 
-Plus standalone spans on session commands (`openclaw.command.new|reset|stop`) and gateway startup (`openclaw.gateway.startup`).
+**V3 New Capabilities:**
+
+| Feature | Description |
+|---------|-------------|
+| Model Call Spans | `chat {model}` CLIENT spans with full GenAI semconv (request/response model, tokens, cache, finish reasons) |
+| Tool Call Timing | `before_tool_call` / `after_tool_call` hooks with accurate duration, approval workflow |
+| Session Tracking | Long-lived `openclaw.session` spans with duration, request count, end reason |
+| Dispatch Spans | `openclaw.dispatch.prepare` spans for LLM request dispatch phase |
+| Log Export Pipeline | OTLP log export via `log.record` diagnostic events with severity, filtering, trace correlation |
+| Security Detection | Prompt injection, dangerous command, sensitive file access detection on spans |
+| GenAI Semantic Conventions | Full stable `gen_ai.*` attributes alongside legacy `openclaw.*` for dashboard compat |
+| Tool Approval Tracking | `gen_ai.tool.approval.requested/resolution/duration_ms` attributes |
+| Cron & Sub-Agent Monitoring | Spans and metrics for cron jobs and sub-agent orchestration |
+| Diagnostic Integration | Token/cost data from `model.usage` events enriches spans via `onDiagnosticEvent` |
 
 **Per-Tool Visibility:**
-- Individual spans for each tool call
-- Tool execution time
-- Result size (characters)
-- Error tracking per tool
+- Individual `execute_tool {name}` spans per GenAI semconv
+- Tool execution time via `before_tool_call` → `after_tool_call`
+- Result size (characters), input preview
+- Error tracking per tool with `error.type`
+- Tool approval requested/resolution/duration
 
 **Request Lifecycle:**
-- Full message → response tracing
-- Session context propagation
-- Agent turn duration with token breakdown
+- Full message → response tracing with connected parent-child spans
+- Session context propagation via TraceContextStore
+- Agent turn duration with token breakdown from diagnostics
+- Dispatch prepare/reply phase tracking
 
 ### Plugin Lifecycle
 
@@ -111,9 +128,9 @@ OpenClaw has two hook registration moments, and the plugin uses both at the righ
 
 | Phase | Runs | What the plugin does |
 |---|---|---|
-| `register()` | Synchronous, before the gateway accepts traffic | Registers **all 15 typed hooks** via `api.on()`, event-stream hooks (`command:*`, `gateway:startup`), the `otel-observability.status` RPC, the `otel` CLI command, the background service, and the optional `otel_status` agent tool. Hooks receive a **lazy telemetry getter** (`() => telemetry`) so they can be wired before the OTel runtime exists. |
-| `start()` | Async, after the gateway is ready | Calls `initTelemetry()` to build the `TracerProvider`/`MeterProvider` and register them globally, conditionally initializes OpenLLMetry wraps when `traces` is on, and subscribes to OpenClaw diagnostic events for cost/token data. |
-| `stop()` | Async, on gateway reload/shutdown | Clears the 60 s stale-session sweeper `setInterval` ([ISI-522](https://github.com/henrikrexed/openclaw-observability-plugin/commit/b668a4f)), unsubscribes from diagnostics, and calls `telemetry.shutdown()` to flush exporters. |
+| `register()` | Synchronous, before the gateway accepts traffic | Registers **all typed hooks** via `api.on()` (message_received, session_start/end, before_model_resolve, before_prompt_build, llm_input/output, model_call_started/ended, before_dispatch/reply_dispatch, before_tool_call/after_tool_call, tool_approval_resolution, tool_result_persist, message_sent, before_agent_finalize, agent_end, before_reset, cron hooks, subagent hooks), event-stream hooks (`command:*`, `gateway:startup`), the `otel-observability.status` RPC, the `otel` CLI command, the background service, and the optional `otel_status` agent tool. Hooks receive a **lazy telemetry getter** (`() => telemetry`) so they can be wired before the OTel runtime exists. |
+| `start()` | Async, after the gateway is ready | Calls `initTelemetry()` to build the `TracerProvider`/`MeterProvider` and register them globally, initializes the OTLP log export pipeline, conditionally initializes OpenLLMetry wraps when `traces` is on, and subscribes to OpenClaw diagnostic events (`model.usage`, `log.record`) for cost/token data and log forwarding. |
+| `stop()` | Async, on gateway reload/shutdown | Clears the stale-session sweeper `setInterval`, unsubscribes from diagnostics, shuts down the log pipeline, and calls `telemetry.shutdown()` to flush exporters. |
 
 **Why this matters:** OpenClaw snapshots typed hooks at registration time. If hooks are registered from `start()` instead of `register()`, the gateway never sees them and **hooks register but never fire**. PR #6 (see [ISI-515](https://github.com/henrikrexed/openclaw-observability-plugin/pull/6)) moved them back to `register()` and introduced the lazy getter so handlers no-op cleanly during the brief `register()` → `start()` window.
 
@@ -160,11 +177,16 @@ You should see, in this order:
 [otel] Registered message_received hook (via api.on)
 [otel] Registered before_model_resolve hook (via api.on)
 [otel] Registered before_prompt_build hook (via api.on)
+[otel] Registered model_call_started hook (via api.on)
+[otel] Registered before_tool_call hook (via api.on)
 [otel] Registered tool_result_persist hook (via api.on)
 [otel] Registered agent_end hook (via api.on)
+[otel] Registered session_start hook (via api.on)
 [otel] Registered command event hooks (via api.registerHook)
 [otel] Registered gateway:startup hook (via api.registerHook)
 [otel] Starting OpenTelemetry observability...
+[otel] Telemetry runtime initialized
+[otel] ✅ Log export pipeline initialized
 [otel] ✅ Observability pipeline active
 [otel]   Traces=true Metrics=true Logs=true
 [otel]   Endpoint=http://localhost:4318 (http)
@@ -190,14 +212,20 @@ In your backend, look for an `openclaw.request` span with at least one `openclaw
 
 | Feature | Official Plugin | Custom Plugin |
 |---------|-----------------|---------------|
-| Token metrics | ✅ Per model | ✅ Per session + model |
-| Cost tracking | ✅ Yes | ✅ Yes (from diagnostics) |
-| Gateway health | ✅ Webhooks, queues, sessions | ❌ Not focused |
-| Session state | ✅ State transitions | ❌ Not tracked |
-| **Tool call tracing** | ❌ No | ✅ Individual tool spans |
-| **Request lifecycle** | ❌ No | ✅ Full request → response |
-| **Connected traces** | ❌ Separate spans | ✅ Parent-child hierarchy |
-| Setup complexity | 🟢 Config only | 🟡 Plugin installation |
+| Token metrics | Per model | Per session + model + cache |
+| Cost tracking | Yes | Yes (from diagnostics) |
+| Gateway health | Webhooks, queues, sessions | Not focused |
+| Session state | State transitions | Long-lived session spans |
+| **Tool call tracing** | No | Individual tool spans with timing |
+| **Request lifecycle** | No | Full request → response connected |
+| **Connected traces** | Separate spans | Parent-child hierarchy |
+| **Model call spans** | No | `chat {model}` with GenAI semconv |
+| **Tool approval** | No | Approval workflow tracking |
+| **Log export** | Basic OTLP | OTLP with filtering + trace correlation |
+| **Security detection** | No | Prompt injection, dangerous commands |
+| **Cron monitoring** | No | Cron change/execution/error spans |
+| **Sub-agent tracking** | No | Spawn/duration/ended spans |
+| Setup complexity | Config only | Plugin installation |
 
 ---
 
@@ -291,10 +319,38 @@ The following settings are controlled via the `diagnostics.otel` config block:
 |--------|------|---------|-------------|
 | `endpoint` | string | `http://localhost:4318` | OTLP endpoint URL |
 | `serviceName` | string | `openclaw-gateway` | Service name |
-| `protocol` | string | `http/protobuf` | OTLP protocol |
+| `protocol` | string | `http/protobuf` | OTLP protocol (`http` or `grpc`) |
 | `traces` | boolean | true | Enable traces |
 | `metrics` | boolean | true | Enable metrics |
-| `logs` | boolean | true | Enable logs |
+| `logs` | boolean | true | Enable OTLP log export via diagnostic events |
+| `captureContent` | boolean | false | Capture LLM prompt/completion text (privacy-sensitive) |
+| `metricsIntervalMs` | number | 30000 | Metric export interval in milliseconds |
+
+### Log Pipeline Configuration
+
+The log export pipeline supports filtering and exclusion rules via the `logConfig` block:
+
+```json
+{
+  "logConfig": {
+    "enabled": true,
+    "excludeLevels": ["debug", "trace"],
+    "excludeLoggers": ["noisy-module"],
+    "excludeMessagePatterns": ["health check", "/ping/i"],
+    "filters": [
+      { "field": "logger", "pattern": "internal.", "action": "exclude" }
+    ]
+  }
+}
+```
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `enabled` | boolean | Enable log pipeline (default: true) |
+| `excludeLevels` | string[] | Severity levels to exclude (e.g., `["debug", "trace"]`) |
+| `excludeLoggers` | string[] | Logger names to exclude (case-insensitive substring match) |
+| `excludeMessagePatterns` | (string\|RegExp)[] | Message patterns to exclude |
+| `filters` | FilterRule[] | Advanced filter rules with `field`, `pattern`, `action` |
 
 ---
 
@@ -303,6 +359,7 @@ The following settings are controlled via the `diagnostics.otel` config block:
 - [Getting Started](./docs/getting-started.md) — Setup guide
 - [Configuration](./docs/configuration.md) — All options
 - [Architecture](./docs/architecture.md) — How it works
+- [Migration V2 → V3](./docs/migration-v2-to-v3.md) — Upgrade guide
 - [Limitations](./docs/limitations.md) — Known constraints
 - [Backends](./docs/backends/) — Backend-specific guides
 
