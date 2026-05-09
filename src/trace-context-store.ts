@@ -28,6 +28,7 @@ export interface SessionContext {
   context?: Context;
   startedAt: number;
   requestCount: number;
+  channel?: string;
 }
 
 export interface RequestContext {

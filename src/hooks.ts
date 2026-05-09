@@ -248,6 +248,7 @@ export function registerHooks(
           context: sessionContext,
           startedAt: Date.now(),
           requestCount: 0,
+          channel,
         });
 
         gauges.activeSessions.add(1, {
@@ -302,7 +303,9 @@ export function registerHooks(
 
         sessionSpan.end();
 
-        gauges.activeSessions.add(-1, {});
+        gauges.activeSessions.add(-1, {
+          "openclaw.session.channel": sessionCtx.channel || "unknown",
+        });
 
         store.deleteSession(sessionKey);
 
@@ -412,6 +415,8 @@ export function registerHooks(
     "before_prompt_build",
     (event: any, ctx: any) => {
       try {
+        const tel = getTelemetry();
+        if (!tel) return undefined;
         const sessionKey = ctx?.sessionKey || "unknown";
         const sessionCtx = store.getActiveContext(sessionKey);
         const agentSpan = sessionCtx?.agentSpan;
@@ -715,12 +720,6 @@ export function registerHooks(
         if (cacheCreationInputTokens > 0) {
           span.setAttribute(GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, cacheCreationInputTokens);
         }
-        if (cacheRead > 0) {
-          span.setAttribute("gen_ai.usage.cache_read_tokens", cacheRead);
-        }
-        if (cacheWrite > 0) {
-          span.setAttribute("gen_ai.usage.cache_write_tokens", cacheWrite);
-        }
         if (totalTokens > 0) {
           span.setAttribute("gen_ai.usage.total_tokens", totalTokens);
         }
@@ -886,12 +885,6 @@ export function registerHooks(
         const toolInput = event?.input || event?.toolInput || event?.args || {};
         const requiresApproval = event?.requiresApproval === true;
 
-        counters.toolCalls.add(1, {
-          [GEN_AI_TOOL_NAME]: toolName,
-          [GEN_AI_OPERATION_NAME]: OP_EXECUTE_TOOL,
-          [GEN_AI_CONVERSATION_ID]: sessionKey,
-        });
-
         const sessionCtx = store.getActiveContext(sessionKey);
         const parentContext = sessionCtx?.agentContext || sessionCtx?.rootContext || context.active();
 
@@ -973,6 +966,12 @@ export function registerHooks(
 
         const { span, startTime, approvalRequested } = active;
         const durationMs = Date.now() - startTime;
+
+        counters.toolCalls.add(1, {
+          [GEN_AI_TOOL_NAME]: toolName,
+          [GEN_AI_OPERATION_NAME]: OP_EXECUTE_TOOL,
+          [GEN_AI_CONVERSATION_ID]: sessionKey,
+        });
 
         span.setAttribute("openclaw.tool.duration_ms", durationMs);
 
