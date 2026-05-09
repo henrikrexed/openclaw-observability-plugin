@@ -128,7 +128,16 @@ OpenClaw has two hook registration moments, and the plugin uses both at the righ
 
 | Phase | Runs | What the plugin does |
 |---|---|---|
-| `register()` | Synchronous, before the gateway accepts traffic | Registers **all typed hooks** via `api.on()` (message_received, session_start/end, before_model_resolve, before_prompt_build, llm_input/output, model_call_started/ended, before_dispatch/reply_dispatch, before_tool_call/after_tool_call, tool_approval_resolution, tool_result_persist, message_sent, before_agent_finalize, agent_end, before_reset, cron hooks, subagent hooks), event-stream hooks (`command:*`, `gateway:startup`), the `otel-observability.status` RPC, the `otel` CLI command, the background service, and the optional `otel_status` agent tool. Hooks receive a **lazy telemetry getter** (`() => telemetry`) so they can be wired before the OTel runtime exists. |
+| `register()` | Synchronous, before the gateway accepts traffic | Registers **all V3 typed hooks** via `api.on()` (see list below), plus event-stream hooks (`command:*`, `gateway:startup`), the `otel-observability.status` RPC, the `otel` CLI command, the background service, and the optional `otel_status` agent tool. Hooks receive a **lazy telemetry getter** (`() => telemetry`) so they can be wired before the OTel runtime exists. |
+
+<details>
+<summary>Typed hooks registered in <code>register()</code></summary>
+
+**Lifecycle hooks:** `message_received`, `session_start`, `session_end`, `before_model_resolve`, `before_prompt_build`, `llm_input`, `llm_output`, `model_call_started`, `model_call_ended`, `before_dispatch`, `reply_dispatch`, `before_tool_call`, `after_tool_call`, `tool_approval_resolution`, `tool_result_persist`, `message_sent`, `before_agent_finalize`, `agent_end`, `before_reset`
+
+**Orchestration hooks:** cron hooks (`cron_change`, `cron_execution`, `cron_error`), subagent hooks (`subagent_spawn`, `subagent_ended`)
+
+</details>
 | `start()` | Async, after the gateway is ready | Calls `initTelemetry()` to build the `TracerProvider`/`MeterProvider` and register them globally, initializes the OTLP log export pipeline, conditionally initializes OpenLLMetry wraps when `traces` is on, and subscribes to OpenClaw diagnostic events (`model.usage`, `log.record`) for cost/token data and log forwarding. |
 | `stop()` | Async, on gateway reload/shutdown | Clears the stale-session sweeper `setInterval`, unsubscribes from diagnostics, shuts down the log pipeline, and calls `telemetry.shutdown()` to flush exporters. |
 
@@ -487,8 +496,6 @@ The custom plugin requires messages to flow through the normal pipeline (`messag
 ## Known Limitations
 
 **Auto-instrumentation not possible:** OpenLLMetry/IITM breaks `@mariozechner/pi-ai` named exports due to ESM/CJS module isolation. All telemetry is captured via hooks, not direct SDK instrumentation.
-
-**No per-LLM-call spans:** Individual API calls to Claude/OpenAI cannot be traced. Token usage is aggregated per agent turn.
 
 See [Limitations](./docs/limitations.md) for details.
 

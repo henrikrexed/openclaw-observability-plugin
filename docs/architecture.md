@@ -146,7 +146,7 @@ OpenClaw drives plugins through three phases. Mixing them up is the single most 
 
 | Phase | Runs | Responsibility |
 |---|---|---|
-| `register()` | Synchronous, before the gateway accepts traffic | Wire every typed hook, event-stream hook, RPC method, CLI command, background service, and agent tool. Typed hooks (`message_received`, `before_model_resolve`, `before_prompt_build`, `llm_input`, `llm_output`, `tool_result_persist`, `message_sent`, `agent_end`, plus the command and gateway event hooks) land here. |
+| `register()` | Synchronous, before the gateway accepts traffic | Wire every typed hook (`message_received`, `session_start`, `session_end`, `before_model_resolve`, `before_prompt_build`, `llm_input`, `llm_output`, `model_call_started`, `model_call_ended`, `before_dispatch`, `reply_dispatch`, `before_tool_call`, `after_tool_call`, `tool_approval_resolution`, `tool_result_persist`, `message_sent`, `before_agent_finalize`, `agent_end`, `before_reset`, cron hooks, subagent hooks), event-stream hooks (`command:*`, `gateway:startup`), RPC method, CLI command, background service, and agent tool. |
 | `start()` | Async, once the gateway is ready | Build the OTel runtime (`initTelemetry` → TracerProvider + MeterProvider), optionally wrap LLM SDKs with OpenLLMetry when `traces` is on, and subscribe to OpenClaw diagnostic events for cost/token data. |
 | `stop()` | Async, on gateway reload or shutdown | Clear the stale-session sweeper `setInterval` (see [b668a4f](https://github.com/henrikrexed/openclaw-observability-plugin/commit/b668a4f), ISI-522), unsubscribe from diagnostics, and call `telemetry.shutdown()` so batched spans/metrics flush before the process exits. |
 

@@ -151,19 +151,21 @@ No breaking config changes. New options:
 
 ## Rollback
 
-If issues arise, pin to the 0.1.x branch:
+If issues arise, switch to the `release/0.1.x` branch:
 
 ```json
 {
   "plugins": {
+    "load": {
+      "paths": ["https://github.com/henrikrexed/openclaw-observability-plugin.git#release/0.1.x"]
+    },
     "entries": {
       "otel-observability": {
-        "enabled": true,
-        "version": "0.1.x"
+        "enabled": true
       }
     }
   }
 }
 ```
 
-The 0.1.x branch receives security and critical regression fixes through 2026-10-21.
+The `release/0.1.x` branch receives security and critical regression fixes through 2026-10-21.

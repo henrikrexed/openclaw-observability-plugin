@@ -5,11 +5,12 @@
  * Trace structure per request:
  *   openclaw.request (root span, covers full message → reply lifecycle)
  *   ├── openclaw.agent.turn (agent processing span)
- *   │   ├── tool.exec (tool call)
- *   │   ├── tool.Read (tool call)
- *   │   ├── anthropic.chat (auto-instrumented by OpenLLMetry)
- *   │   └── tool.write (tool call)
- *   └── (future: message.sent span)
+ *   │   ├── openclaw.dispatch.prepare
+ *   │   ├── chat {model} (model call span, GenAI semconv)
+ *   │   ├── execute_tool Read (tool span)
+ *   │   ├── execute_tool Write (tool span)
+ *   │   └── execute_tool Bash (tool span)
+ *   └── openclaw.message.sent
  *
  * Context propagation:
  *   - message_received:     creates root span, stores in TraceContextStore
