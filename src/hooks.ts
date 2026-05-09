@@ -23,10 +23,10 @@
  *   - agent_end:            ends the agent turn + root spans
  *
  * Hook migration note (ISI-730):
- *   OpenClaw 2026.2+ treats `before_agent_start` as a legacy compatibility
+ *   OpenClaw 2026.4.21+ treats `before_agent_start` as a legacy compatibility
  *   hook and recommends `before_model_resolve` / `before_prompt_build` for
  *   new work. This plugin is fully migrated — it no longer registers
- *   `before_agent_start`. Minimum OpenClaw runtime is therefore 2026.2.x.
+ *   `before_agent_start`. Minimum OpenClaw runtime is therefore 2026.4.21.
  *
  * IMPORTANT: OpenClaw has TWO hook registration systems:
  *   - api.registerHook() → event-stream hooks (command:new, gateway:startup)
@@ -323,7 +323,7 @@ export function registerHooks(
   // Creates an "agent turn" child span under the root request span.
   //
   // Fires EARLIEST in the agent run, before provider/model resolution
-  // (OpenClaw 2026.2+). The resolved model is NOT known at this point —
+  // (OpenClaw 2026.4.21+). The resolved model is NOT known at this point —
   // it is populated later from diagnostic events or at agent_end
   // (as gen_ai.response.model).
   //

@@ -204,7 +204,7 @@ You should see, in this order:
 > **Hook migration (v0.2.0, ISI-730).** The plugin migrated off the legacy
 > `before_agent_start` hook. The agent turn span is now started in
 > `before_model_resolve` and enriched in `before_prompt_build`. This requires
-> OpenClaw ≥ 2026.2. Pin to `0.1.x` if you need the legacy path.
+> OpenClaw ≥ 2026.4.21. Pin to `0.1.x` if you need the legacy path.
 
 Then, on the next inbound message, the debug log confirms hooks are live:
 

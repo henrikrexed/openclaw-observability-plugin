@@ -1,14 +1,13 @@
-import { SeverityNumber, logs } from "@opentelemetry/api-logs";
+import { SeverityNumber, logs, type AnyValue, type AnyValueMap } from "@opentelemetry/api-logs";
 import {
   LoggerProvider,
   BatchLogRecordProcessor,
-  ConsoleLogRecordExporter,
 } from "@opentelemetry/sdk-logs";
 import { OTLPLogExporter as OTLPLogExporterHTTP } from "@opentelemetry/exporter-logs-otlp-http";
 import { OTLPLogExporter as OTLPLogExporterGRPC } from "@opentelemetry/exporter-logs-otlp-grpc";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
-import { trace, context, type Span } from "@opentelemetry/api";
+import { trace, context } from "@opentelemetry/api";
 
 import type { OtelObservabilityConfig } from "./config.js";
 import type { TelemetryRuntime } from "./telemetry.js";
@@ -156,6 +155,32 @@ export function parseLogConfig(raw: unknown): LogPipelineConfig {
   };
 }
 
+function toAnyValue(value: unknown): AnyValue {
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+  if (value instanceof Uint8Array) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => toAnyValue(entry));
+  }
+  if (typeof value === "object") {
+    const map: AnyValueMap = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      map[key] = toAnyValue(entry);
+    }
+    return map;
+  }
+  return String(value);
+}
+
 export function initLogPipeline(
   config: OtelObservabilityConfig,
   logger: any
@@ -185,13 +210,15 @@ export function initLogPipeline(
     ...config.resourceAttributes,
   });
 
-  const loggerProvider = new LoggerProvider({ resource });
-  loggerProvider.addLogRecordProcessor(
-    new BatchLogRecordProcessor(logExporter, {
-      maxExportBatchSize: 512,
-      scheduledDelayMillis: 5000,
-    })
-  );
+  const loggerProvider = new LoggerProvider({
+    resource,
+    processors: [
+      new BatchLogRecordProcessor(logExporter, {
+        maxExportBatchSize: 512,
+        scheduledDelayMillis: 5000,
+      }),
+    ],
+  });
 
   logs.setGlobalLoggerProvider(loggerProvider);
 
@@ -204,7 +231,7 @@ export function initLogPipeline(
       const severityNumber = resolveSeverity(evt.level);
       const severityText = (evt.level || "info").toUpperCase();
 
-      const attributes: Record<string, unknown> = {};
+      const attributes: AnyValueMap = {};
 
       if (evt.logger) attributes["openclaw.log.logger"] = evt.logger;
       if (evt.function) attributes["openclaw.log.function"] = evt.function;
@@ -222,7 +249,7 @@ export function initLogPipeline(
           k !== "logger" && k !== "function" && k !== "file" && k !== "line" &&
           k !== "sessionKey" && k !== "agentId" && k !== "timestamp"
         ) {
-          attributes[`openclaw.log.extra.${k}`] = v;
+          attributes[`openclaw.log.extra.${k}`] = toAnyValue(v);
         }
       }
 

@@ -69,7 +69,7 @@ const otelObservabilityPlugin = {
     // sweeper interval) so service.stop() doesn't leak the timer.
     try {
       telemetry = initTelemetry(config, logger);
-      stopHooks = registerHooks(api, telemetry, config);
+      stopHooks = registerHooks(api, () => telemetry, config);
       logger.info("[otel] Telemetry + hooks initialized at register() (runner-compatible)");
     } catch (err) {
       logger.error(`[otel] Failed to initialize telemetry at register() time: ${String(err)}`);
