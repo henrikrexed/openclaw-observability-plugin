@@ -87,7 +87,7 @@ export interface OtelHistograms {
   llmDuration: Histogram;
   /** Tool execution duration in ms */
   toolDuration: Histogram;
-  /** Tool execution duration in ms */
+  /** Alias of toolDuration retained for hooks/tests that still reference the old name. */
   toolCallDuration: Histogram;
   /** Agent turn duration in ms */
   agentTurnDuration: Histogram;
