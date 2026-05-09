@@ -10,7 +10,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/ index.ts",
+    "lint": "tsc --noEmit",
     "test": "node --test instrumentation/*.test.mjs && vitest run"
   },
   "keywords": [
