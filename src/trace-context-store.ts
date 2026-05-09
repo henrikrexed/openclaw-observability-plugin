@@ -226,7 +226,11 @@ export class TraceContextStore {
 
   // ── Resolved context (legacy compat) ──────────────────────────────
 
-  resolveLegacyContext(sessionKey: string): LegacyTraceContext | undefined {
+  resolveLegacyContext(sessionKey: string, _visited?: Set<string>): LegacyTraceContext | undefined {
+    const visited = _visited ?? new Set<string>();
+    if (visited.has(sessionKey)) return undefined;
+    visited.add(sessionKey);
+
     const turn = this.getActiveTurn(sessionKey);
     const req = this.getActiveRequest(sessionKey);
     const legacy = this.activeContexts.get(sessionKey);
@@ -274,6 +278,11 @@ export class TraceContextStore {
         activeToolSpans: legacy?.activeToolSpans,
         startTime: turn.startedAt,
       };
+    }
+
+    const parentKey = this.subAgentLinks.get(sessionKey);
+    if (parentKey) {
+      return this.resolveLegacyContext(parentKey, visited);
     }
 
     return undefined;

@@ -336,6 +336,50 @@ describe("TraceContextStore", () => {
     it("returns undefined when no context exists", () => {
       expect(store.resolveLegacyContext("missing")).toBeUndefined();
     });
+
+    it("traverses sub-agent link when child has no context", () => {
+      const rootSpan = createSpanSpy("root");
+      const turnSpan = createSpanSpy("turn");
+      store.setRequest("parent", "pr1", {
+        rootSpan,
+        rootContext: createContextSpy(),
+        startedAt: 100,
+      });
+      store.setAgentTurn("parent", "pt1", {
+        span: turnSpan,
+        context: createContextSpy(),
+        startedAt: 150,
+      });
+      store.linkSubAgent("child", "parent");
+
+      const legacy = store.resolveLegacyContext("child");
+      expect(legacy).toBeDefined();
+      expect(legacy!.rootSpan).toBe(rootSpan);
+      expect(legacy!.agentSpan).toBe(turnSpan);
+    });
+
+    it("traverses multi-level sub-agent chain", () => {
+      const rootSpan = createSpanSpy("root");
+      store.setRequest("grandparent", "gp1", {
+        rootSpan,
+        rootContext: createContextSpy(),
+        startedAt: 100,
+      });
+      store.linkSubAgent("child", "parent");
+      store.linkSubAgent("parent", "grandparent");
+
+      const legacy = store.resolveLegacyContext("child");
+      expect(legacy).toBeDefined();
+      expect(legacy!.rootSpan).toBe(rootSpan);
+    });
+
+    it("handles circular sub-agent links without infinite loop", () => {
+      store.linkSubAgent("a", "b");
+      store.linkSubAgent("b", "a");
+
+      const legacy = store.resolveLegacyContext("a");
+      expect(legacy).toBeUndefined();
+    });
   });
 
   // ── Cleanup ────────────────────────────────────────────────────────
