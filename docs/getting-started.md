@@ -77,12 +77,17 @@ Add to your `~/.openclaw/openclaw.json`:
     },
     "entries": {
       "otel-observability": {
-        "enabled": true
+        "enabled": true,
+        "hooks": {
+          "allowConversationAccess": true
+        }
       }
     }
   }
 }
 ```
+
+> **Required for OpenClaw ≥ 2026.4.23.** Path-loaded (non-bundled) plugins must explicitly opt in to conversation typed hooks. Without `hooks.allowConversationAccess: true`, OpenClaw silently drops the registrations for `before_model_resolve`, `llm_input`, `llm_output`, `before_agent_finalize`, `agent_end`, `before_agent_reply`, and `before_agent_run`. The plugin still prints its `[otel] Registered ... hook (via api.on)` banners but the handlers never fire, so no `openclaw.request` / `openclaw.agent.turn` spans reach your backend. See [github issue #20](https://github.com/henrikrexed/openclaw-observability-plugin/issues/20) and the [troubleshooting section](../README.md#hooks-register-but-never-fire).
 
 > **Note:** Do NOT add a `config` block inside `otel-observability` — OpenClaw's plugin framework rejects unknown properties. The plugin reads its settings from the `diagnostics.otel` section instead. If you need custom settings, configure them in `diagnostics.otel` (see Option 1 above).
 
@@ -164,6 +169,9 @@ For complete observability, enable both:
     "entries": {
       "otel-observability": {
         "enabled": true,
+        "hooks": {
+          "allowConversationAccess": true
+        },
         "config": {
           "endpoint": "http://localhost:4318",
           "serviceName": "openclaw-gateway"
@@ -173,6 +181,8 @@ For complete observability, enable both:
   }
 }
 ```
+
+> `hooks.allowConversationAccess: true` is required on OpenClaw ≥ 2026.4.23. See [the install step above](#step-3-configure-openclaw).
 
 **What you get:**
 
