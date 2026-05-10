@@ -4,6 +4,36 @@ All notable changes to the `@openclaw/otel-observability` plugin are documented 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-05-10
+
+### Added
+
+- **Log export pipeline (ISI-930).** OTLP log export via `log.record` diagnostic events
+  with severity mapping, trace context enrichment, configurable filtering, and logger
+  name/function/file/line attributes.
+- **Trace context store.** New `TraceContextStore` module for session context propagation
+  across spans, including legacy context merge and stale session cleanup.
+- **V2 → V3 migration guide** at `docs/migration-v2-to-v3.md` covering breaking changes,
+  new features, dashboard migration, and upgrade steps.
+- **Troubleshooting section** in README covering hook registration, plugin loading, and
+  trace connectivity issues.
+
+### Fixed
+
+- Align `activeSessions` gauge attributes between `session_start` and `session_end` hooks.
+- `resolveLegacyContext` now traverses sub-agent links for correct context resolution.
+- Trace context store handles legacy context merge and safe stale cleanup.
+- Deduplicated tool input preview logic via `setToolInputPreview` helper.
+- Telemetry histogram alias wording clarified.
+- Review follow-up typecheck inconsistencies resolved.
+- Lint script replaced broken `eslint` reference with `tsc --noEmit`.
+
+### Changed
+
+- README updated with V3 features table, plugin lifecycle documentation, and log pipeline
+  configuration reference.
+- Architecture docs updated with new trace structure and GenAI semconv attributes table.
+
 ## [0.2.0] — 2026-04-23
 
 ### Changed

@@ -1,6 +1,6 @@
 # Migration Guide: V2 to V3
 
-This guide covers upgrading from the OpenClaw Observability Plugin V2 (0.1.x) to V3 (0.2.x).
+This guide covers upgrading from the OpenClaw Observability Plugin V2 (0.1.x) to V3 (0.2.x/0.3.x).
 
 ## Minimum Requirements
 
@@ -143,7 +143,7 @@ No breaking config changes. New options:
 ## Upgrade Steps
 
 1. Update OpenClaw Gateway to >= 2026.4.21
-2. Update the plugin package to 0.2.x
+2. Update the plugin package to 0.3.x
 3. Clear the jiti cache: `rm -rf /tmp/jiti`
 4. Restart the gateway: `systemctl --user restart openclaw-gateway`
 5. Verify new hooks are registered in logs (look for `model_call_started`, `before_tool_call`, `session_start`)

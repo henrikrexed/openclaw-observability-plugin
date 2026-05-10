@@ -14,7 +14,8 @@ The plugin follows a two-track support model. Pick the plugin track that matches
 | Plugin track | OpenClaw range    | Branch           | Status                                                   | Window                                         |
 | ------------ | ----------------- | ---------------- | -------------------------------------------------------- | ---------------------------------------------- |
 | `0.1.x`      | `< 2026.4.21`     | `release/0.1.x`  | Maintenance — security + critical regressions only        | Through **2026-10-21**                         |
-| `0.2.x`      | `>= 2026.4.21`    | `main`           | Active — features, new attributes, new hooks              | Default going forward                          |
+| `0.2.x`      | `>= 2026.4.21`    | `main`           | Superseded by 0.3.x                                      | Replaced by 0.3.x                             |
+| `0.3.x`      | `>= 2026.4.21`    | `main`           | Active — V3 features, log pipeline, bug fixes             | Default going forward                          |
 
 > OpenClaw `2026.4.21` introduced the `before_model_resolve` and `before_prompt_build` hooks and deprecated `before_agent_start`. The `0.2.x` line targets the new hooks; the `0.1.x` line remains on the legacy hook for existing deployments.
 
