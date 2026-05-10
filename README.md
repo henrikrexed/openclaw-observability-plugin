@@ -160,12 +160,17 @@ OpenClaw has two hook registration moments, and the plugin uses both at the righ
        },
        "entries": {
          "otel-observability": {
-           "enabled": true
+           "enabled": true,
+           "hooks": {
+             "allowConversationAccess": true
+           }
          }
        }
      }
    }
    ```
+
+   > **Required for OpenClaw ≥ 2026.4.23.** The runtime silently blocks the conversation typed hooks (`before_model_resolve`, `llm_input`, `llm_output`, `before_agent_finalize`, `agent_end`, `before_agent_reply`, `before_agent_run`) for non-bundled (path-loaded) plugins unless `hooks.allowConversationAccess: true` is set on the entry. Without it, the registration banners still print but `openclaw.request` / `openclaw.agent.turn` spans never reach your backend. See [Troubleshooting → Hooks register but never fire](#hooks-register-but-never-fire) and [github issue #20](https://github.com/henrikrexed/openclaw-observability-plugin/issues/20).
 
 3. Clear cache and restart:
    ```bash
@@ -441,13 +446,51 @@ See [Security: Tetragon](./docs/security/tetragon.md) for full installation and 
 
 ### Hooks register but never fire
 
-**Symptom.** The plugin logs `[otel] ✅ Observability pipeline active` at gateway startup, but no `openclaw.request` or `tool.*` spans ever reach your backend — even after you send messages that clearly invoke tools.
+**Symptom.** The plugin logs `[otel] ✅ Observability pipeline active` at gateway startup and prints all the `[otel] Registered ... hook (via api.on)` banners, but no `openclaw.request` or `openclaw.agent.turn` spans ever reach your backend — even after you send messages that clearly invoke tools. The plugin's metrics keep exporting every 30 s with the right resource attributes but every counter stays at `Value: 0.000000` with `openclaw.idle: Bool(true)` (the idle-keepalive heartbeat).
 
-**Cause (pre-PR #6).** Earlier builds registered typed hooks from inside the async `service.start()` phase. OpenClaw snapshots typed hooks at plugin registration time, ~30 s before `start()` runs, so the gateway never saw the 15 hook listeners. See [ISI-515](https://github.com/henrikrexed/openclaw-observability-plugin/pull/6).
+There are two distinct causes that produce the same outward symptom. Check both.
 
-**Fix.** Upgrade to a build that includes PR #6. Hooks are now registered synchronously in `register()` and resolve the telemetry runtime lazily.
+#### Cause A — `hooks.allowConversationAccess` not set (OpenClaw ≥ 2026.4.23)
 
-**How to confirm hooks are live:**
+OpenClaw 2026.4.23 introduced a typed-hook policy gate. The runtime silently drops registrations for the **conversation hooks** — `before_model_resolve`, `before_agent_reply`, `llm_input`, `llm_output`, `before_agent_finalize`, `agent_end`, `before_agent_run` — when the plugin is **non-bundled** (loaded via `plugins.load.paths`, the install path documented in this repo) and the entry does not explicitly opt in. `api.on(...)` returns silently, so the plugin's `[otel] Registered ... hook` banner still prints, but the handler is never wired into the typed-hook registry. The gateway log records the block as a `pluginDiagnostics` warning:
+
+```
+typed hook "agent_end" blocked because non-bundled plugins must set
+plugins.entries.otel-observability.hooks.allowConversationAccess=true
+```
+
+(One line per blocked hook. Look for it under `openclaw plugins list --diagnostics` or in `~/.openclaw/logs/gateway.log`.)
+
+**Fix.** Set the policy on the plugin entry:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "hooks": {
+          "allowConversationAccess": true
+        }
+      }
+    }
+  }
+}
+```
+
+Restart the gateway after editing. This setting was added to OpenClaw's plugin-config schema in 2026.4.23 alongside the gate; if you saw `Unrecognized key: "allowConversationAccess"` and a `Config auto-restored from last-known-good` rollback on first attempt, you were briefly on a build between [openclaw#71621](https://github.com/openclaw/openclaw/issues/71621) opening and its same-day fix — upgrade to any 2026.4.24+ release.
+
+**Why this matters here.** The conversation hooks are exactly the ones that anchor the plugin's trace structure: `before_model_resolve` opens the agent turn span, `llm_input`/`llm_output` produce the model-call span, and `agent_end` closes everything. Without them, only the standalone counters (`messagesReceived`, etc.) and the `message_received` root span survive — and even those usually go undetected because the agent never finishes the turn properly. Sibling plugins that **are** bundled in OpenClaw (e.g., `memory-lancedb-pro`) are not affected by the gate, which is why their `agent_end` handler still fires on the same turns.
+
+This is the cause behind [github issue #20](https://github.com/henrikrexed/openclaw-observability-plugin/issues/20) and the most common report on `0.2.x`/`0.3.x` against OpenClaw 2026.4.23 or newer.
+
+#### Cause B — Hooks registered from `start()` instead of `register()` (pre-PR #6)
+
+Earlier builds registered typed hooks from inside the async `service.start()` phase. OpenClaw snapshots typed hooks at plugin registration time, ~30 s before `start()` runs, so the gateway never saw the listeners. See [ISI-515](https://github.com/henrikrexed/openclaw-observability-plugin/pull/6).
+
+**Fix.** Upgrade to a build that includes PR #6 (any `0.2.x` or newer). Hooks are now registered synchronously in `register()` and resolve the telemetry runtime lazily.
+
+#### How to confirm hooks are live
 
 1. Check the gateway log for the registration lines emitted from `register()`:
    ```
@@ -459,16 +502,20 @@ See [Security: Tetragon](./docs/security/tetragon.md) for full installation and 
    [otel] Registered command event hooks (via api.registerHook)
    [otel] Registered gateway:startup hook (via api.registerHook)
    ```
-   If these are **missing**, the plugin is not loaded — check `plugins.load.paths` in `openclaw.json` and clear `/tmp/jiti`.
+   If these are **missing**, the plugin is not loaded — check `plugins.load.paths` in `openclaw.json` and clear `/tmp/jiti`. If they print but spans still never appear, jump to step 2.
 
-2. Send a real message through the pipeline and watch for the per-event debug lines (enable debug logging first):
+2. Look for `pluginDiagnostics` warnings about blocked typed hooks. The presence of any
+   `typed hook "<name>" blocked because non-bundled plugins must set ... allowConversationAccess=true`
+   line is the deterministic signal for **Cause A** above. The registration banner and the block warning can both be present in the same boot — the banner only proves `api.on()` returned, not that the registration was accepted.
+
+3. Send a real message through the pipeline and watch for the per-event debug lines (enable debug logging first):
    ```
    [otel] Root span started for session=<sessionKey>
    [otel] Agent turn span started: agent=<agentId>, session=<sessionKey>
    ```
-   If registration lines are present but these do **not** appear on messages, the hooks are registered but the gateway is not firing them for your event path (e.g., heartbeats and some internal events do not carry full session context).
+   If only the `Root span started` line appears but never `Agent turn span started`, conversation hooks are blocked (Cause A). If neither appears on inbound `/v1/chat/completions` or channel messages, the gateway is not firing typed hooks for your event path (e.g., heartbeats and some internal events do not carry full session context).
 
-3. Verify your OTLP endpoint is actually receiving data:
+4. Verify your OTLP endpoint is actually receiving data:
    ```bash
    curl -v http://localhost:4318/v1/traces
    ```

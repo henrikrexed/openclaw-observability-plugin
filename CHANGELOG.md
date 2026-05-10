@@ -4,6 +4,25 @@ All notable changes to the `@openclaw/otel-observability` plugin are documented 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Document the `hooks.allowConversationAccess: true` requirement (ISI-945,
+  github issue [#20](https://github.com/henrikrexed/openclaw-observability-plugin/issues/20)).**
+  OpenClaw 2026.4.23 introduced a typed-hook policy gate: non-bundled
+  (path-loaded) plugins must explicitly opt in to the conversation hooks
+  (`before_model_resolve`, `before_agent_reply`, `llm_input`, `llm_output`,
+  `before_agent_finalize`, `agent_end`, `before_agent_run`) by setting
+  `plugins.entries.<plugin-id>.hooks.allowConversationAccess: true` on their
+  entry. Without it the runtime silently drops those registrations — the
+  plugin's `[otel] Registered ... hook (via api.on)` banners still print but
+  the handlers never fire, so no `openclaw.request` / `openclaw.agent.turn`
+  spans reach the backend even though the metric heartbeat keeps emitting.
+  README install snippets, `docs/getting-started.md`, and the
+  README troubleshooting section now document the requirement and the
+  `pluginDiagnostics` block warning to look for.
+
 ## [0.3.0] — 2026-05-10
 
 ### Added
