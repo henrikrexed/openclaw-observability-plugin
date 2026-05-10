@@ -146,12 +146,59 @@ OpenClaw has two hook registration moments, and the plugin uses both at the righ
 
 ### Installation
 
+#### Option 1 — npm (recommended)
+
+Install the plugin from npm. This is the path that the [openclaw-operator](https://github.com/henrikrexed/openclaw-operator) uses via `OpenClawInstance.spec.plugins`, and the recommended path for production.
+
+```bash
+npm install @henrikrexed/openclaw-otel-observability
+```
+
+Then add it to your `openclaw.json`:
+
+```json
+{
+  "plugins": {
+    "load": {
+      "paths": ["./node_modules/@henrikrexed/openclaw-otel-observability"]
+    },
+    "entries": {
+      "otel-observability": {
+        "enabled": true
+      }
+    }
+  }
+}
+```
+
+For the operator (Kubernetes), reference the package directly:
+
+```yaml
+apiVersion: openclaw.io/v1alpha1
+kind: OpenClawInstance
+spec:
+  plugins:
+    - name: "@henrikrexed/openclaw-otel-observability"
+      version: "^0.3.1"
+```
+
+Clear the jiti cache and restart the gateway:
+
+```bash
+rm -rf /tmp/jiti
+systemctl --user restart openclaw-gateway
+```
+
+#### Option 2 — Local development (clone)
+
+For contributing or running an unreleased build:
+
 1. Clone this repository:
    ```bash
    git clone https://github.com/henrikrexed/openclaw-observability-plugin.git
    ```
 
-2. Add to your `openclaw.json`:
+2. Add to your `openclaw.json` pointing at the clone path:
    ```json
    {
      "plugins": {

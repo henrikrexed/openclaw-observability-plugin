@@ -1,12 +1,34 @@
 {
-  "name": "@openclaw/otel-observability",
-  "version": "0.3.0",
+  "name": "@henrikrexed/openclaw-otel-observability",
+  "version": "0.3.1",
   "description": "OpenTelemetry observability plugin for OpenClaw — traces, metrics, and logs for your AI agent using OpenLLMetry",
   "type": "module",
   "openclaw": {
     "extensions": [
       "./index.ts"
     ]
+  },
+  "files": [
+    "index.ts",
+    "src/**/*.ts",
+    "instrumentation/preload.mjs",
+    "instrumentation/capture-content.mjs",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/henrikrexed/openclaw-observability-plugin.git"
+  },
+  "homepage": "https://github.com/henrikrexed/openclaw-observability-plugin#readme",
+  "bugs": {
+    "url": "https://github.com/henrikrexed/openclaw-observability-plugin/issues"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

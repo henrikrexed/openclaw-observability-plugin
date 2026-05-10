@@ -1,10 +1,31 @@
 # Changelog
 
-All notable changes to the `@openclaw/otel-observability` plugin are documented in this file.
+All notable changes to the `@henrikrexed/openclaw-otel-observability` plugin are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.1] — 2026-05-10
+
+### Added
+
+- **npm publication (ISI-947 / GH#21).** Plugin is now published on npm as
+  `@henrikrexed/openclaw-otel-observability`, enabling installation via
+  `openclaw-operator`'s `OpenClawInstance.spec.plugins`.
+- **Release automation.** `release-please` workflow opens versioning PRs from
+  conventional-commit history; merging a release PR creates a GitHub Release,
+  which triggers the `publish-npm` workflow with `--provenance --access public`.
+- `package.json` now declares a `files` allowlist (source `.ts`, preload mjs,
+  manifest, README, LICENSE, CHANGELOG) so the published tarball excludes
+  tests, dashboards, docs site, and dev tooling.
+
+### Changed
+
+- Package renamed from `@openclaw/otel-observability` to
+  `@henrikrexed/openclaw-otel-observability`. The `@openclaw` scope is owned
+  by an unrelated maintainer, so the plugin uses the author's personal scope
+  (mirroring `@larksuite/openclaw-lark` and `@tencent-weixin/openclaw-weixin`).
+- README install guide leads with `npm install`; the `git clone` path is
+  retained as a "local development" fallback.
 
 ### Fixed
 

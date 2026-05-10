@@ -2,7 +2,7 @@
   "id": "otel-observability",
   "name": "OpenTelemetry Observability",
   "description": "Traces, metrics, and logs for OpenClaw using OpenLLMetry and OpenTelemetry",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "minOpenClawVersion": "2026.4.21",
   "uiHints": {
     "endpoint": {
