@@ -146,7 +146,7 @@ OpenClaw drives plugins through three phases. Mixing them up is the single most 
 
 | Phase | Runs | Responsibility |
 |---|---|---|
-| `register()` | Synchronous, before the gateway accepts traffic | Wire every typed hook, event-stream hook, RPC method, CLI command, background service, and agent tool. Typed hooks (`message_received`, `before_model_resolve`, `before_prompt_build`, `llm_input`, `llm_output`, `tool_result_persist`, `message_sent`, `agent_end`, plus the command and gateway event hooks) land here. |
+| `register()` | Synchronous, before the gateway accepts traffic | Wire every typed hook (`message_received`, `session_start`, `session_end`, `before_model_resolve`, `before_prompt_build`, `llm_input`, `llm_output`, `model_call_started`, `model_call_ended`, `before_dispatch`, `reply_dispatch`, `before_tool_call`, `after_tool_call`, `tool_approval_resolution`, `tool_result_persist`, `message_sent`, `before_agent_finalize`, `agent_end`, `before_reset`, cron hooks, subagent hooks), event-stream hooks (`command:*`, `gateway:startup`), RPC method, CLI command, background service, and agent tool. |
 | `start()` | Async, once the gateway is ready | Build the OTel runtime (`initTelemetry` → TracerProvider + MeterProvider), optionally wrap LLM SDKs with OpenLLMetry when `traces` is on, and subscribe to OpenClaw diagnostic events for cost/token data. |
 | `stop()` | Async, on gateway reload or shutdown | Clear the stale-session sweeper `setInterval` (see [b668a4f](https://github.com/henrikrexed/openclaw-observability-plugin/commit/b668a4f), ISI-522), unsubscribe from diagnostics, and call `telemetry.shutdown()` so batched spans/metrics flush before the process exits. |
 
@@ -248,24 +248,47 @@ const span = tracer.startSpan(
 openclaw.request (root)
 │   openclaw.session.key: "main@whatsapp:+123..."
 │   openclaw.message.channel: "whatsapp"
-│   openclaw.request.duration_ms: 4523
+│
+├── openclaw.session (long-lived, covers entire conversation)
+│   gen_ai.conversation.id: "session-abc"
+│   openclaw.session.channel: "whatsapp"
+│   openclaw.session.user_id: "user-42"
 │
 └── openclaw.agent.turn (child)
+    │   gen_ai.operation.name: "invoke_agent"
     │   gen_ai.usage.input_tokens: 1234
     │   gen_ai.usage.output_tokens: 567
     │   gen_ai.response.model: "claude-opus-4-5-..."
+    │   gen_ai.provider.name: "anthropic"
     │   openclaw.agent.duration_ms: 4100
+    │   openclaw.prompt.chars: 256
+    │   openclaw.session.message_count: 8
     │
-    ├── tool.Read (child)
-    │       openclaw.tool.name: "Read"
+    ├── openclaw.dispatch.prepare
+    │       gen_ai.request.model: "claude-opus-4-5-..."
+    │
+    ├── chat claude-opus-4-5-20250514 (model call span)
+    │       gen_ai.system: "anthropic"
+    │       gen_ai.request.model: "claude-opus-4-5-..."
+    │       gen_ai.response.model: "claude-opus-4-5-20250514"
+    │       gen_ai.usage.input_tokens: 1234
+    │       gen_ai.usage.output_tokens: 567
+    │       gen_ai.usage.cache_read.input_tokens: 800
+    │       gen_ai.response.finish_reasons: "end_turn"
+    │
+    ├── execute_tool Read (tool span)
+    │       gen_ai.tool.name: "Read"
+    │       gen_ai.operation.name: "execute_tool"
+    │       openclaw.tool.duration_ms: 45
     │       openclaw.tool.result_chars: 2048
     │
-    ├── tool.exec (child)
-    │       openclaw.tool.name: "exec"
-    │       openclaw.tool.result_chars: 156
+    ├── execute_tool Bash (tool span)
+    │       gen_ai.tool.name: "Bash"
+    │       openclaw.tool.input_preview: '{"command":"ls -la"}'
+    │       openclaw.tool.duration_ms: 120
     │
-    └── tool.Write (child)
-            openclaw.tool.name: "Write"
+    └── execute_tool Write (tool span)
+            gen_ai.tool.name: "Write"
             openclaw.tool.result_chars: 0
 ```
 
@@ -332,13 +355,32 @@ openclaw.request (root)
 
 | Attribute | Description |
 |-----------|-------------|
+| `gen_ai.operation.name` | Operation: `invoke_agent`, `chat`, `execute_tool` |
+| `gen_ai.system` | LLM provider name |
+| `gen_ai.request.model` | Requested model name |
+| `gen_ai.response.model` | Actual model used |
+| `gen_ai.response.id` | LLM response ID |
+| `gen_ai.response.finish_reasons` | Stop reasons |
+| `gen_ai.usage.input_tokens` | Input token count |
+| `gen_ai.usage.output_tokens` | Output token count |
+| `gen_ai.usage.cache_read.input_tokens` | Cache read tokens |
+| `gen_ai.usage.cache_creation.input_tokens` | Cache creation tokens |
+| `gen_ai.request.stream` | Whether streaming |
+| `gen_ai.request.max_tokens` | Max token limit |
+| `gen_ai.provider.name` | Provider name |
+| `gen_ai.tool.approval.requested` | Approval required |
+| `gen_ai.tool.approval.resolution` | Approved/denied |
+| `gen_ai.tool.approval.duration_ms` | Approval wait time |
 | `openclaw.agent.id` | Agent identifier |
 | `openclaw.tool.name` | Tool name |
 | `openclaw.tool.call_id` | Tool call UUID |
 | `openclaw.tool.result_chars` | Result size |
-| `gen_ai.usage.input_tokens` | Input token count |
-| `gen_ai.usage.output_tokens` | Output token count |
-| `gen_ai.response.model` | Model used |
+| `openclaw.tool.duration_ms` | Tool execution time |
+| `openclaw.session.channel` | Channel (whatsapp, cli, etc.) |
+| `openclaw.session.user_id` | User identifier |
+| `openclaw.prompt.chars` | Prompt character count |
+| `openclaw.session.message_count` | History size fed to LLM |
+| `openclaw.dispatch.duration_ms` | Dispatch phase duration |
 
 ---
 

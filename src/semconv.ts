@@ -17,18 +17,29 @@
 // ── GenAI stable attribute keys ─────────────────────────────────────
 export const GEN_AI_SYSTEM = "gen_ai.system";
 export const GEN_AI_OPERATION_NAME = "gen_ai.operation.name";
+export const GEN_AI_PROVIDER_NAME = "gen_ai.provider.name";
 export const GEN_AI_REQUEST_MODEL = "gen_ai.request.model";
+export const GEN_AI_REQUEST_MAX_TOKENS = "gen_ai.request.max_tokens";
+export const GEN_AI_REQUEST_STREAM = "gen_ai.request.stream";
 export const GEN_AI_RESPONSE_MODEL = "gen_ai.response.model";
+export const GEN_AI_RESPONSE_ID = "gen_ai.response.id";
+export const GEN_AI_RESPONSE_FINISH_REASONS = "gen_ai.response.finish_reasons";
 export const GEN_AI_CONVERSATION_ID = "gen_ai.conversation.id";
 export const GEN_AI_AGENT_ID = "gen_ai.agent.id";
 export const GEN_AI_AGENT_NAME = "gen_ai.agent.name";
 export const GEN_AI_TOOL_NAME = "gen_ai.tool.name";
 export const GEN_AI_TOOL_CALL_ID = "gen_ai.tool.call.id";
 export const GEN_AI_TOOL_TYPE = "gen_ai.tool.type";
+export const GEN_AI_TOOL_APPROVAL_REQUESTED = "gen_ai.tool.approval.requested";
+export const GEN_AI_TOOL_APPROVAL_RESOLUTION = "gen_ai.tool.approval.resolution";
+export const GEN_AI_TOOL_APPROVAL_DURATION_MS = "gen_ai.tool.approval.duration_ms";
 export const GEN_AI_USAGE_INPUT_TOKENS = "gen_ai.usage.input_tokens";
 export const GEN_AI_USAGE_OUTPUT_TOKENS = "gen_ai.usage.output_tokens";
 export const GEN_AI_USAGE_TOTAL_TOKENS = "gen_ai.usage.total_tokens";
 /** Non-stable but de-facto — cache tokens are not yet covered by stable semconv. */
+export const GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS = "gen_ai.usage.cache_read.input_tokens";
+export const GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS =
+  "gen_ai.usage.cache_creation.input_tokens";
 export const GEN_AI_USAGE_CACHE_READ_TOKENS = "gen_ai.usage.cache_read_tokens";
 export const GEN_AI_USAGE_CACHE_WRITE_TOKENS = "gen_ai.usage.cache_write_tokens";
 /** Used on `gen_ai.client.token.usage` histogram to distinguish input / output. */
@@ -46,6 +57,7 @@ export const METRIC_OPERATION_DURATION = "gen_ai.client.operation.duration";
 // ── GenAI span name helpers ─────────────────────────────────────────
 export const spanNameInvokeAgent = (agentName: string): string =>
   `${OP_INVOKE_AGENT} ${agentName}`;
+export const spanNameChat = (modelName: string): string => `${OP_CHAT} ${modelName}`;
 export const spanNameExecuteTool = (toolName: string): string =>
   `${OP_EXECUTE_TOOL} ${toolName}`;
 
@@ -78,6 +90,21 @@ export const OC_CONTEXT_LIMIT = "openclaw.context.limit";
 export const OC_CONTEXT_USED = "openclaw.context.used";
 export const OC_PROVIDER = "openclaw.provider";
 export const OC_SCHEMA_VERSION = "openclaw.schema.version";
+export const OC_SUBAGENT_PARENT_SESSION = "openclaw.subagent.parent_session_key";
+export const OC_SUBAGENT_CHILD_SESSION = "openclaw.subagent.child_session_key";
+export const OC_SUBAGENT_CHILD_AGENT_ID = "openclaw.subagent.child_agent_id";
+export const OC_SUBAGENT_CHILD_AGENT_NAME = "openclaw.subagent.child_agent_name";
+export const OC_SUBAGENT_SPAWN_REASON = "openclaw.subagent.spawn_reason";
+export const OC_SUBAGENT_DELIVERY_TYPE = "openclaw.subagent.delivery_type";
+export const OC_SUBAGENT_SUCCESS = "openclaw.subagent.success";
+export const OC_SUBAGENT_DURATION_MS = "openclaw.subagent.duration_ms";
+export const OC_CRON_JOB_NAME = "openclaw.cron.job_name";
+export const OC_CRON_ACTION = "openclaw.cron.action";
+export const OC_CRON_TRIGGER = "openclaw.cron.trigger";
+export const OC_CRON_EXPRESSION = "openclaw.cron.expression";
+export const OC_CRON_DURATION_MS = "openclaw.cron.duration_ms";
+export const OC_CRON_SUCCESS = "openclaw.cron.success";
+export const OC_CRON_AGENT_ID = "openclaw.cron.agent_id";
 
 /**
  * Schema version for plugin-domain attributes. Bump when emitted

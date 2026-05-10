@@ -23,6 +23,8 @@ export interface OtelObservabilityConfig {
   metricsIntervalMs: number;
   /** Additional OTel resource attributes */
   resourceAttributes: Record<string, string>;
+  /** Optional log pipeline filtering configuration */
+  logConfig?: Record<string, unknown>;
 }
 
 const DEFAULTS: OtelObservabilityConfig = {
@@ -68,5 +70,11 @@ export function parseConfig(raw: unknown): OtelObservabilityConfig {
       !Array.isArray(obj.resourceAttributes)
         ? (obj.resourceAttributes as Record<string, string>)
         : DEFAULTS.resourceAttributes,
+    logConfig:
+      obj.logConfig &&
+      typeof obj.logConfig === "object" &&
+      !Array.isArray(obj.logConfig)
+        ? (obj.logConfig as Record<string, unknown>)
+        : undefined,
   };
 }

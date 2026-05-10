@@ -54,6 +54,8 @@ export interface OtelCounters {
   toolCalls: Counter;
   /** Tool errors */
   toolErrors: Counter;
+  /** Tool approvals requested */
+  toolApprovals: Counter;
   /** Session resets */
   sessionResets: Counter;
   /** Messages received */
@@ -68,6 +70,16 @@ export interface OtelCounters {
   promptInjection: Counter;
   /** Dangerous command executions */
   dangerousCommand: Counter;
+  /** Cron change events */
+  cronChanges: Counter;
+  /** Cron execution events */
+  cronExecutions: Counter;
+  /** Cron execution errors */
+  cronErrors: Counter;
+  /** Sub-agent spawn events */
+  subagentSpawns: Counter;
+  /** Sub-agent completion events */
+  subagentEnded: Counter;
 }
 
 export interface OtelHistograms {
@@ -75,12 +87,18 @@ export interface OtelHistograms {
   llmDuration: Histogram;
   /** Tool execution duration in ms */
   toolDuration: Histogram;
+  /** Alias of toolDuration for backward compatibility with existing tool-call duration references. */
+  toolCallDuration: Histogram;
   /** Agent turn duration in ms */
   agentTurnDuration: Histogram;
   /** Stable GenAI client operation duration (seconds). */
   genAiOperationDuration: Histogram;
   /** Stable GenAI client token usage (tokens); use with gen_ai.token.type attr. */
   genAiTokenUsage: Histogram;
+  /** Cron execution duration in ms */
+  cronDuration: Histogram;
+  /** Sub-agent duration in ms */
+  subagentDuration: Histogram;
 }
 
 export interface OtelGauges {
@@ -191,6 +209,10 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       description: "Total tool errors",
       unit: "errors",
     }),
+    toolApprovals: meter.createCounter("openclaw.tool.approvals", {
+      description: "Total tool approval requests",
+      unit: "approvals",
+    }),
     sessionResets: meter.createCounter("openclaw.session.resets", {
       description: "Total session resets",
       unit: "resets",
@@ -220,17 +242,40 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       description: "Dangerous command executions detected",
       unit: "events",
     }),
+    cronChanges: meter.createCounter("openclaw.cron.changes", {
+      description: "Total cron change events",
+      unit: "events",
+    }),
+    cronExecutions: meter.createCounter("openclaw.cron.executions", {
+      description: "Total cron execution events",
+      unit: "events",
+    }),
+    cronErrors: meter.createCounter("openclaw.cron.errors", {
+      description: "Total cron execution errors",
+      unit: "errors",
+    }),
+    subagentSpawns: meter.createCounter("openclaw.subagent.spawns", {
+      description: "Total sub-agent spawn events",
+      unit: "events",
+    }),
+    subagentEnded: meter.createCounter("openclaw.subagent.ended", {
+      description: "Total sub-agent completion events",
+      unit: "events",
+    }),
   };
+
+  const toolDuration = meter.createHistogram("openclaw.tool.duration", {
+    description: "Tool execution duration",
+    unit: "ms",
+  });
 
   const histograms: OtelHistograms = {
     llmDuration: meter.createHistogram("openclaw.llm.duration", {
       description: "LLM request duration",
       unit: "ms",
     }),
-    toolDuration: meter.createHistogram("openclaw.tool.duration", {
-      description: "Tool execution duration",
-      unit: "ms",
-    }),
+    toolDuration,
+    toolCallDuration: toolDuration,
     agentTurnDuration: meter.createHistogram("openclaw.agent.turn_duration", {
       description: "Full agent turn duration (LLM + tools)",
       unit: "ms",
@@ -242,6 +287,14 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     genAiTokenUsage: meter.createHistogram(METRIC_TOKEN_USAGE, {
       description: "Number of input and output tokens used (stable semconv)",
       unit: "{token}",
+    }),
+    cronDuration: meter.createHistogram("openclaw.cron.duration", {
+      description: "Cron execution duration",
+      unit: "ms",
+    }),
+    subagentDuration: meter.createHistogram("openclaw.subagent.duration", {
+      description: "Sub-agent duration",
+      unit: "ms",
     }),
   };
 
