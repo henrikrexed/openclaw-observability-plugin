@@ -138,10 +138,10 @@ Without caching, the same request would cost:
 
 You might notice:
 ```
-cache_read + cache_write + input + output = 998,598
+cache_read + cache_write + input + output ≠ a backend's reported total
 ```
 
-The `total_tokens` is the sum of all types. Some backends may calculate it differently or include additional overhead tokens.
+Adding `cache_read.input_tokens` + `cache_creation.input_tokens` + `input_tokens` + `output_tokens` may not equal a backend's reported total — different backends count overhead tokens differently. As of schema `1.3.0`, OpenClaw no longer emits `gen_ai.usage.total_tokens`; compute it as `gen_ai.usage.input_tokens + gen_ai.usage.output_tokens` on the consumer side.
 
 ## Optimizing Token Usage
 
