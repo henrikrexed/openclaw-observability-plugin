@@ -168,6 +168,18 @@ const otelObservabilityPlugin = {
         //     (`inputMessages || outputMessages || systemPrompt`), kept
         //     for older preloads and external subprocesses that still
         //     read the legacy flag.
+        //
+        // Precedence (subprocesses): these assignments **always
+        // overwrite** whatever the gateway was launched with. A
+        // subprocess spawned by gateway code (e.g. a child OpenClaw
+        // runner) therefore inherits the plugin's resolved policy, not
+        // whatever the operator originally set in the gateway's
+        // environment. This is intentional — plugin config is the
+        // authority for in-process behavior; the env vars exist only to
+        // brief the preload that ran before plugin config was parsed.
+        // If you need a subprocess to see a different value, set it
+        // explicitly in that subprocess's spawn-time env, not in the
+        // gateway's.
         const llmContentEnabled = policyEnablesLlmContent(config.captureContent);
         const policyJson = JSON.stringify(config.captureContent);
         const preloadActive = (globalThis as any).__OPENCLAW_OTEL_PRELOAD_ACTIVE === true;

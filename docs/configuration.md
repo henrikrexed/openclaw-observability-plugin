@@ -248,11 +248,13 @@ The plugin exposes a `captureContent` field in `plugins.entries.otel-observabili
 |------|--------------------|-------------------|
 | `inputMessages` | `openclaw.content.input_message` (request span), `openclaw.content.prompt` / `openclaw.content.messages` (agent.turn span) | Inbound user message + the prompt and message history fed to the LLM |
 | `outputMessages` | `openclaw.content.output_message` (message.sent span) | Outbound assistant reply text |
-| `toolInputs` | `openclaw.content.tool_input` (execute_tool span) | Full tool-call input arguments (JSON-stringified, capped at 8 KB) |
-| `toolOutputs` | `openclaw.content.tool_output` (execute_tool span) | Tool-call result text (text parts of the result message, capped at 8 KB) |
+| `toolInputs` | `openclaw.content.tool_input` (execute_tool span) | Full tool-call input arguments (JSON-stringified, capped at 8192 UTF-16 code units) |
+| `toolOutputs` | `openclaw.content.tool_output` (execute_tool span) | Tool-call result text (text parts of the result message, capped at 8192 UTF-16 code units) |
 | `systemPrompt` | `openclaw.content.system_prompt` (agent.turn span) | System prompt text |
 
 LLM-client spans emitted by Traceloop (`@traceloop/instrumentation-anthropic`, `@traceloop/instrumentation-openai`) still respect the legacy single-boolean Traceloop flag. The plugin derives it from the policy as `inputMessages || outputMessages || systemPrompt` — the three categories that map to prompt/completion text.
+
+> ⚠️ **Direction selection only applies to the plugin's own spans.** Traceloop's `traceContent` is a single boolean with no input/output distinction, so enabling **any** of `inputMessages`, `outputMessages`, or `systemPrompt` causes Traceloop LLM-client spans to record **both** `gen_ai.prompt.*.content` and `gen_ai.completion.*.content`. The `openclaw.content.*` attributes on the plugin's hook-surface spans **do** honor each flag in isolation — e.g., `{ inputMessages: true }` will record `openclaw.content.input_message` but not `openclaw.content.output_message`. If you need strict one-direction capture without completions landing on LLM-client spans, leave every LLM-content flag off and capture from the hook surface only (or filter `gen_ai.completion.*.content` at the OTel Collector). See [Privacy: `captureContent`](./security/privacy.md#traceloop-llm-client-spans-via-the-preload).
 
 **Default: `false` (every flag off, privacy-first).** See [github issue #15](https://github.com/henrikrexed/openclaw-observability-plugin/issues/15) for the motivating report and ISI-1000 for the granular policy.
 

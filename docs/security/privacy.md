@@ -24,6 +24,8 @@ Traceloop instrumentations (`@traceloop/instrumentation-anthropic`, `@traceloop/
 
 Token counts, model identifiers, latency, cost, and error state are recorded regardless of the flag — only the prompt/completion text is gated.
 
+> ⚠️ **Traceloop is all-or-nothing across directions.** Traceloop exposes a single `traceContent` boolean and does not distinguish input from output. The plugin's policy unifies the three LLM-content categories with `inputMessages || outputMessages || systemPrompt`, so enabling **any one** of them flips Traceloop on and Traceloop then records **both** `gen_ai.prompt.*.content` and `gen_ai.completion.*.content` on LLM-client spans. Concretely, `{ inputMessages: true }` does not record prompts only — completions land on the LLM-client span too. If you need true one-direction capture, leave every LLM-content flag (`inputMessages`, `outputMessages`, `systemPrompt`) at `false` and rely on the plugin's per-flag-gated `openclaw.content.*` attributes on the hook-surface spans, which **do** honor the requested direction in isolation.
+
 ### Plugin hook-surface spans (`openclaw.content.*`)
 
 Each policy flag also gates one or more `openclaw.content.*` attributes on the plugin's own spans:
@@ -36,7 +38,7 @@ Each policy flag also gates one or more `openclaw.content.*` attributes on the p
 | `toolOutputs` | `openclaw.content.tool_output` on `execute_tool <tool>` | Tool-call result text (text parts only) |
 | `systemPrompt` | `openclaw.content.system_prompt` on `openclaw.agent.turn` | System prompt text |
 
-All `openclaw.content.*` attributes are truncated to 8 KB per value. Larger payloads get an inline `…(truncated, N more chars)` marker.
+All `openclaw.content.*` attributes are truncated to **8192 UTF-16 code units** per value (a JavaScript string `.length` measurement, not bytes — CJK and emoji content can occupy 2–4 bytes per code point on the wire). Larger payloads get an inline `…(truncated, N more chars)` marker, and the cut point is adjusted by one code unit when it would otherwise split a surrogate pair so the prefix stays valid UTF-16.
 
 ## What `captureContent` does **not** affect
 
@@ -47,7 +49,7 @@ All `openclaw.content.*` attributes are truncated to 8 KB per value. Larger payl
 - `execute_tool *` — tool name, duration, `openclaw.tool.input_preview` (1 KB truncated preview), result chars/parts counts
 - `openclaw.message.sent` — channel, recipient, char count
 
-The `openclaw.tool.input_preview` preview attribute is **always** emitted, independent of `toolInputs`. It is a 1 KB capped preview meant for debugging and security correlation; the granular `openclaw.content.tool_input` is the larger 8 KB capture that the policy gates.
+The `openclaw.tool.input_preview` preview attribute is **always** emitted, independent of `toolInputs`. It is a 1 KB capped preview meant for debugging and security correlation; the granular `openclaw.content.tool_input` is the larger 8192-code-unit capture that the policy gates.
 
 ## Gateway-launch setting (not hot-reloadable)
 

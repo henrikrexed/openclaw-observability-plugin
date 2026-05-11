@@ -80,12 +80,12 @@
         "description": "Enable log export"
       },
       "captureContent": {
-        "description": "Content capture policy. `true`/`false` toggle every category at once; an object selects categories individually. See docs/security/privacy.md.",
+        "description": "Content capture policy. `true`/`false` toggle every category at once; an object selects categories individually. Unknown keys are tolerated by the parser and ignored at runtime. See docs/security/privacy.md.",
         "oneOf": [
           { "type": "boolean" },
           {
             "type": "object",
-            "additionalProperties": false,
+            "additionalProperties": true,
             "properties": {
               "inputMessages": { "type": "boolean", "description": "Capture inbound user message text on the request/agent.turn spans." },
               "outputMessages": { "type": "boolean", "description": "Capture outbound assistant reply text on the message.sent span." },

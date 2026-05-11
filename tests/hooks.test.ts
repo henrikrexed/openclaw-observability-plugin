@@ -2352,7 +2352,7 @@ describe("content capture policy gating (ISI-1000)", () => {
     });
   });
 
-  it("truncates content captures longer than 8 KB with an inline marker", () => {
+  it("truncates content captures longer than 8192 code units with an inline marker", () => {
     const { api, typedHooks } = createStubApi();
     const { telemetry, spans } = createTelemetry();
     stopHooks = registerHooks(
@@ -2371,6 +2371,49 @@ describe("content capture policy gating (ISI-1000)", () => {
     const captured = sent!.attrs["openclaw.content.output_message"] as string;
     expect(captured.length).toBeLessThanOrEqual(10_000);
     expect(captured).toMatch(/^x{8192}…\(truncated, 1808 more chars\)$/);
+
+    stopHooks();
+  });
+
+  it("backs off one code unit when the truncation cut would split a UTF-16 surrogate pair", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ outputMessages: true }),
+    );
+
+    // 8191 ASCII chars + a non-BMP emoji (2 UTF-16 code units) + filler.
+    // A naïve `.slice(0, 8192)` would split the surrogate pair and leave
+    // a lone high surrogate as the last code unit, which is invalid
+    // UTF-16. The captureContentAttribute helper detects that and backs
+    // off by one code unit, so the prefix becomes exactly 8191 'x's.
+    const head = "x".repeat(8191);
+    const emoji = "😀"; // U+1F600 — encoded as two UTF-16 code units
+    const tail = "y".repeat(2_000);
+    const text = head + emoji + tail;
+    expect(text.length).toBe(8191 + 2 + 2_000);
+    expect(text.charCodeAt(8191)).toBeGreaterThanOrEqual(0xd800);
+    expect(text.charCodeAt(8191)).toBeLessThanOrEqual(0xdbff);
+
+    typedHooks.get("message_sent")!(
+      { sessionKey: "s1", channel: "cli", to: "user", text },
+      { sessionKey: "s1" },
+    );
+
+    const sent = spans.find((s) => s.spanName === "openclaw.message.sent");
+    const captured = sent!.attrs["openclaw.content.output_message"] as string;
+    // Prefix is 8191 'x's (one less than the 8192 cap), the surrogate
+    // pair is dropped, and the truncation marker reports the overflow
+    // relative to the actual cut point.
+    const overflow = text.length - 8191; // 2002 more code units
+    expect(captured).toMatch(
+      new RegExp(`^x{8191}…\\(truncated, ${overflow} more chars\\)$`),
+    );
+    // Verify the prefix is well-formed UTF-16 (no dangling high surrogate).
+    const lastCode = captured.charCodeAt(8191 - 1);
+    expect(lastCode < 0xd800 || lastCode > 0xdbff).toBe(true);
 
     stopHooks();
   });

@@ -12,6 +12,15 @@
  *       text). `toolInputs`/`toolOutputs` are captured on the plugin's
  *       own hook-surface spans, not Traceloop's.
  *
+ *       Raw-boolean shorthand is also accepted:
+ *         - `'true'`  → equivalent to an all-on policy.
+ *         - `'false'` → equivalent to an all-off policy.
+ *       This is a forgiving path for operators who set the var as
+ *       `=true`/`=false` rather than a JSON object — without it the
+ *       value silently fell through to the legacy `OPENCLAW_OTEL_CAPTURE_CONTENT`,
+ *       which is the surprising-misconfiguration case the granular var
+ *       was supposed to replace.
+ *
  *   - `OPENCLAW_OTEL_CAPTURE_CONTENT` (legacy)
  *       Strict string `'true'` enables Traceloop content capture.
  *       Any other value (including `'1'`, `'True'`, `'yes'`, unset)
@@ -22,12 +31,20 @@
  * must be bridged via env vars set by whatever launches the gateway.
  */
 export function resolveCaptureContent(env = process.env) {
-  const policy = parseContentPolicyEnv(env[CONTENT_POLICY_ENV]);
+  const rawPolicy = env[CONTENT_POLICY_ENV];
+  const policy = parseContentPolicyEnv(rawPolicy);
   if (policy) {
     return Boolean(
       policy.inputMessages || policy.outputMessages || policy.systemPrompt,
     );
   }
+  // Raw-boolean shorthand: `OPENCLAW_OTEL_CONTENT_POLICY=true|false`.
+  // Resolves directly without falling through to the legacy var so that
+  // an operator who sets the granular var (even imprecisely) gets the
+  // behavior they asked for, not whatever happens to be in the legacy
+  // var. Matches the legacy var's exact-lowercase semantics.
+  if (rawPolicy === "true") return true;
+  if (rawPolicy === "false") return false;
   return env[CAPTURE_CONTENT_ENV] === "true";
 }
 
@@ -35,7 +52,9 @@ export function resolveCaptureContent(env = process.env) {
  * Parse `OPENCLAW_OTEL_CONTENT_POLICY` as JSON. Returns the parsed
  * object on success, or `undefined` if the env var is unset, empty, or
  * malformed. Errors are swallowed silently to keep the preload from
- * crashing the gateway on operator misconfiguration.
+ * crashing the gateway on operator misconfiguration. Callers handle the
+ * raw-boolean shorthand themselves — this function only resolves
+ * objects.
  */
 export function parseContentPolicyEnv(raw) {
   if (typeof raw !== "string" || raw.length === 0) return undefined;

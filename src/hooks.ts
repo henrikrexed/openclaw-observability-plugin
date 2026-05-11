@@ -134,6 +134,9 @@ export function registerHooks(
   // all-off, preserving the legacy `captureContent: false` behavior.
   //
   // Capture size is capped per attribute to keep span payloads bounded.
+  // The cap is measured in UTF-16 code units (JS string `.length`), not
+  // bytes — operators should size their OTLP payload budgets with CJK /
+  // emoji content in mind (one code point can be 2–4 bytes in UTF-8).
   // Operators who enable content capture accept the privacy implications
   // documented in `docs/security/privacy.md`.
   const contentPolicy: ContentCapturePolicy = config.captureContent;
@@ -159,8 +162,15 @@ export function registerHooks(
     }
     if (!text) return;
     if (text.length > CONTENT_MAX_CHARS) {
-      const overflow = text.length - CONTENT_MAX_CHARS;
-      text = `${text.slice(0, CONTENT_MAX_CHARS)}…(truncated, ${overflow} more chars)`;
+      // Slicing on a UTF-16 boundary can leave a lone high surrogate
+      // (0xD800–0xDBFF) as the last code unit, which is not a valid
+      // standalone character. Trim one extra code unit when that
+      // happens so the truncated prefix is always well-formed UTF-16.
+      let cut = CONTENT_MAX_CHARS;
+      const lastCode = text.charCodeAt(cut - 1);
+      if (lastCode >= 0xd800 && lastCode <= 0xdbff) cut -= 1;
+      const overflow = text.length - cut;
+      text = `${text.slice(0, cut)}…(truncated, ${overflow} more chars)`;
     }
     span.setAttribute(key, text);
   }

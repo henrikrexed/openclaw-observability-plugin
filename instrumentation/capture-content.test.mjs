@@ -90,3 +90,71 @@ test("parseContentPolicyEnv returns undefined for non-object JSON", () => {
   assert.equal(parseContentPolicyEnv("[]"), undefined);
   assert.equal(parseContentPolicyEnv('"string"'), undefined);
 });
+
+// ── Raw-boolean shorthand on the policy env (ISI-1000 PR-30 review) ──
+
+test("policy env accepts raw 'true' as an all-on shorthand", () => {
+  // An operator setting OPENCLAW_OTEL_CONTENT_POLICY=true (without
+  // wrapping it as JSON) used to silently fall through to the legacy
+  // CAPTURE_CONTENT env, which made the granular var feel broken. The
+  // resolver now accepts the raw boolean directly.
+  assert.equal(resolveCaptureContent({ [CONTENT_POLICY_ENV]: "true" }), true);
+});
+
+test("policy env accepts raw 'false' as an all-off shorthand", () => {
+  assert.equal(
+    resolveCaptureContent({ [CONTENT_POLICY_ENV]: "false" }),
+    false,
+  );
+});
+
+test("raw 'false' on policy env wins over legacy 'true'", () => {
+  // Same precedence rule as the JSON form: the granular var is the
+  // operator's intent, the legacy var is whatever someone set earlier.
+  const env = {
+    [CAPTURE_CONTENT_ENV]: "true",
+    [CONTENT_POLICY_ENV]: "false",
+  };
+  assert.equal(resolveCaptureContent(env), false);
+});
+
+test("raw 'true' on policy env wins over legacy 'false'", () => {
+  const env = {
+    [CAPTURE_CONTENT_ENV]: "false",
+    [CONTENT_POLICY_ENV]: "true",
+  };
+  assert.equal(resolveCaptureContent(env), true);
+});
+
+test("loose truthy raw values on policy env still fall through to legacy", () => {
+  // Mirrors the legacy var's strict-lowercase contract. `'1'`, `'True'`,
+  // `'yes'` are not recognized as the shorthand and therefore fall
+  // through to the legacy var (which itself is strict — those values
+  // resolve to false there too, except 'true').
+  for (const value of ["1", "yes", "True", "TRUE", "on", " true ", "enabled"]) {
+    assert.equal(
+      resolveCaptureContent({ [CONTENT_POLICY_ENV]: value }),
+      false,
+      `expected raw policy value '${value}' to fall through to legacy=false`,
+    );
+  }
+  assert.equal(
+    resolveCaptureContent({
+      [CONTENT_POLICY_ENV]: "1",
+      [CAPTURE_CONTENT_ENV]: "true",
+    }),
+    true,
+    "raw '1' should fall through and let legacy 'true' win",
+  );
+});
+
+test("malformed JSON that is not the literal 'true' or 'false' still falls through to legacy", () => {
+  // Sanity-check the existing fallthrough contract: garbage on the
+  // policy var lets the legacy var decide. This protects ops who copy a
+  // JSON snippet wrong from a silent privacy regression.
+  const env = {
+    [CAPTURE_CONTENT_ENV]: "true",
+    [CONTENT_POLICY_ENV]: "{not-json",
+  };
+  assert.equal(resolveCaptureContent(env), true);
+});

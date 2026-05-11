@@ -138,8 +138,12 @@ export function normalizeContentCapturePolicy(
 export function policyEnablesLlmContent(
   policy: ContentCapturePolicy,
 ): boolean {
-  return (
-    policy.inputMessages || policy.outputMessages || policy.systemPrompt
+  // `Boolean(...)` keeps the return strictly `true` / `false` even if a
+  // caller passes a hand-built policy whose field types have drifted from
+  // the declared `boolean` (e.g. through a loose API or a JSON round-trip
+  // that left `undefined`s in place).
+  return Boolean(
+    policy.inputMessages || policy.outputMessages || policy.systemPrompt,
   );
 }
 

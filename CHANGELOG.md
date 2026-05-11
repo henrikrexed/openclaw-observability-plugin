@@ -13,9 +13,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   per-category flags (`inputMessages`, `outputMessages`, `toolInputs`,
   `toolOutputs`, `systemPrompt`) in addition to the legacy single boolean.
   Each flag gates one or more `openclaw.content.*` span attributes (capped
-  at 8 KB per value). The legacy boolean still works — `true` enables all
-  five flags, `false` disables them. Traceloop's `traceContent` is derived
-  from `inputMessages || outputMessages || systemPrompt`.
+  at 8192 UTF-16 code units per value, with surrogate-pair-safe truncation).
+  The legacy boolean still works — `true` enables all five flags, `false`
+  disables them. Traceloop's `traceContent` is derived from
+  `inputMessages || outputMessages || systemPrompt`; because Traceloop has a
+  single boolean, enabling any one of those three causes its LLM-client spans
+  to record both prompt and completion content (see
+  [`docs/security/privacy.md`](./docs/security/privacy.md)).
 - New env var `OPENCLAW_OTEL_CONTENT_POLICY` (JSON) bridges the policy to
   the ESM preload. Takes precedence over the legacy
   `OPENCLAW_OTEL_CAPTURE_CONTENT` when both are set.
