@@ -55,9 +55,9 @@ import {
   GEN_AI_TOKEN_TYPE,
   GEN_AI_TOOL_CALL_ID,
   GEN_AI_TOOL_NAME,
-  GEN_AI_TOOL_APPROVAL_REQUESTED,
-  GEN_AI_TOOL_APPROVAL_RESOLUTION,
-  GEN_AI_TOOL_APPROVAL_DURATION_MS,
+  OPENCLAW_TOOL_APPROVAL_REQUESTED,
+  OPENCLAW_TOOL_APPROVAL_RESOLUTION,
+  OPENCLAW_TOOL_APPROVAL_DURATION_MS,
   GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
   GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
   GEN_AI_USAGE_CACHE_READ_TOKENS,
@@ -704,9 +704,14 @@ export function registerHooks(
           span.setAttribute(GEN_AI_RESPONSE_ID, responseId);
         }
         if (Array.isArray(finishReasons) && finishReasons.length > 0) {
-          span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, finishReasons.join(","));
+          const cleanReasons = finishReasons.filter(
+            (r): r is string => typeof r === "string" && r.length > 0,
+          );
+          if (cleanReasons.length > 0) {
+            span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, cleanReasons);
+          }
         } else if (typeof finishReasons === "string" && finishReasons) {
-          span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, finishReasons);
+          span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, [finishReasons]);
         }
 
         if (inputTokens > 0) {
@@ -913,7 +918,7 @@ export function registerHooks(
         setToolInputPreview(span, toolInput);
 
         if (requiresApproval) {
-          span.setAttribute(GEN_AI_TOOL_APPROVAL_REQUESTED, true);
+          span.setAttribute(OPENCLAW_TOOL_APPROVAL_REQUESTED, true);
           counters.toolApprovals.add(1, {
             [GEN_AI_TOOL_NAME]: toolName,
             [GEN_AI_CONVERSATION_ID]: sessionKey,
@@ -1003,12 +1008,12 @@ export function registerHooks(
 
         const approvalResolution = event?.approvalResolution || event?.approval?.resolution;
         if (approvalRequested && approvalResolution) {
-          span.setAttribute(GEN_AI_TOOL_APPROVAL_RESOLUTION, String(approvalResolution));
+          span.setAttribute(OPENCLAW_TOOL_APPROVAL_RESOLUTION, String(approvalResolution));
           const approvalDurationMs = active.approvalResolvedAt
             ? active.approvalResolvedAt - startTime
             : undefined;
           if (typeof approvalDurationMs === "number") {
-            span.setAttribute(GEN_AI_TOOL_APPROVAL_DURATION_MS, approvalDurationMs);
+            span.setAttribute(OPENCLAW_TOOL_APPROVAL_DURATION_MS, approvalDurationMs);
           }
         }
 
@@ -1051,7 +1056,7 @@ export function registerHooks(
         const active = sessionCtx.activeToolSpans.get(key);
         if (!active) return undefined;
 
-        active.span.setAttribute(GEN_AI_TOOL_APPROVAL_RESOLUTION, String(resolution));
+        active.span.setAttribute(OPENCLAW_TOOL_APPROVAL_RESOLUTION, String(resolution));
         active.span.addEvent("tool.approval.resolved", {
           "tool.approval.resolution": String(resolution),
           "tool.name": toolName,
@@ -1060,7 +1065,7 @@ export function registerHooks(
 
         if (typeof active.startTime === "number") {
           const waitMs = active.approvalResolvedAt - active.startTime;
-          active.span.setAttribute(GEN_AI_TOOL_APPROVAL_DURATION_MS, waitMs);
+          active.span.setAttribute(OPENCLAW_TOOL_APPROVAL_DURATION_MS, waitMs);
         }
 
         logger.debug?.(`[otel] Tool approval resolved: tool=${toolName}, resolution=${resolution}, session=${sessionKey}`);
@@ -1973,7 +1978,6 @@ export function registerHooks(
               [OC_CRON_AGENT_ID]: agentId,
               [GEN_AI_AGENT_ID]: agentId,
               [GEN_AI_PROVIDER_NAME]: provider,
-              [GEN_AI_OPERATION_NAME]: "cron_executed",
               [CODE_FUNCTION]: "cron_executed",
               [CODE_NAMESPACE]: CODE_NS,
             },

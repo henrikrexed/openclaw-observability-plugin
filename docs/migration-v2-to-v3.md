@@ -39,7 +39,14 @@ V3 emits both GenAI stable attributes (`gen_ai.*`) and legacy attributes (`openc
 - `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_creation.input_tokens`
 - `gen_ai.request.stream`, `gen_ai.request.max_tokens`
 - `gen_ai.provider.name`
-- `gen_ai.tool.approval.requested`, `gen_ai.tool.approval.resolution`, `gen_ai.tool.approval.duration_ms`
+
+> **Schema 1.1.0 (ISI-993) — breaking renames:** the three approval keys formerly under `gen_ai.tool.approval.*` are now plugin-domain attributes:
+>
+> - `gen_ai.tool.approval.requested` → `openclaw.tool.approval.requested`
+> - `gen_ai.tool.approval.resolution` → `openclaw.tool.approval.resolution`
+> - `gen_ai.tool.approval.duration_ms` → `openclaw.tool.approval.duration_ms`
+>
+> Reason: the `gen_ai.*` namespace is reserved for the OTel registry. Dashboards filtering on the old keys must be updated. `gen_ai.response.finish_reasons` is also now emitted as `string[]` (was previously a comma-joined string).
 
 **New openclaw attributes:**
 - `openclaw.session.channel`, `openclaw.session.user_id`, `openclaw.session.duration_ms`
@@ -69,7 +76,7 @@ openclaw.agent.turn
 Tool spans now use `before_tool_call` / `after_tool_call` hooks for accurate timing instead of relying solely on `tool_result_persist`:
 
 - Duration measured from before execution to after completion
-- Tool approval workflow tracking (`gen_ai.tool.approval.*`)
+- Tool approval workflow tracking (`openclaw.tool.approval.*` since schema 1.1.0; previously `gen_ai.tool.approval.*`)
 - Backward compatible: `tool_result_persist` still creates spans when `before_tool_call` didn't fire
 
 ### Session Spans (ISI-928)
