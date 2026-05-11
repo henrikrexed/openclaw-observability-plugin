@@ -30,7 +30,7 @@
  */
 
 import { parseConfig, policyEnablesLlmContent, type OtelObservabilityConfig } from "./src/config.js";
-import { initTelemetry, type TelemetryRuntime } from "./src/telemetry.js";
+import { initTelemetry, hasPreloadedOtelSdk, type TelemetryRuntime } from "./src/telemetry.js";
 import { initOpenLLMetry } from "./src/openllmetry.js";
 import { registerHooks } from "./src/hooks.js";
 import { registerDiagnosticsListener, hasDiagnosticsSupport } from "./src/diagnostics.js";
@@ -182,7 +182,7 @@ const otelObservabilityPlugin = {
         // gateway's.
         const llmContentEnabled = policyEnablesLlmContent(config.captureContent);
         const policyJson = JSON.stringify(config.captureContent);
-        const preloadActive = (globalThis as any).__OPENCLAW_OTEL_PRELOAD_ACTIVE === true;
+        const preloadActive = hasPreloadedOtelSdk();
         const preloadResolved = (globalThis as any).__OPENCLAW_OTEL_CAPTURE_CONTENT;
         if (preloadActive && preloadResolved !== llmContentEnabled) {
           logger.warn(

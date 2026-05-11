@@ -2438,5 +2438,37 @@ describe("content capture policy gating (ISI-1000)", () => {
 
     stopHooks();
   });
+
+  it("redacts bearer tokens and API keys in captured content (ISI-999 + ISI-1000)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ outputMessages: true }),
+    );
+
+    // Mix of secret patterns redactSensitiveText knows: a bearer token and
+    // an Anthropic-style API key. Both must be scrubbed before reaching the
+    // span attribute — captureContentAttribute MUST route through
+    // setRedactedAttribute so operators who turn on content capture cannot
+    // accidentally leak credentials embedded in tool/LLM output.
+    const bearer = "abc123xyz0123456789DEFGHIJKL";
+    const apiKey = "sk-ant-AAAABBBBCCCCDDDDEEEE";
+    const leaky = `reply with Authorization: Bearer ${bearer} and key ${apiKey}`;
+    typedHooks.get("message_sent")!(
+      { sessionKey: "s1", channel: "cli", to: "user", text: leaky },
+      { sessionKey: "s1" },
+    );
+
+    const sent = spans.find((s) => s.spanName === "openclaw.message.sent");
+    const captured = sent!.attrs["openclaw.content.output_message"] as string;
+    expect(captured).toContain("Bearer [REDACTED_TOKEN]");
+    expect(captured).toContain("[REDACTED_API_KEY]");
+    expect(captured).not.toContain(bearer);
+    expect(captured).not.toContain(apiKey);
+
+    stopHooks();
+  });
 });
 

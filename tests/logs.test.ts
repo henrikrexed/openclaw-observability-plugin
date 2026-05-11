@@ -13,6 +13,7 @@ import {
   initLogPipeline,
   parseLogConfig,
   shouldExclude,
+  toAnyValue,
   type LogEvent,
   type LogPipelineConfig,
 } from "../src/logs.js";
@@ -248,5 +249,48 @@ describe("parseLogConfig (ISI-930)", () => {
   it("filters out non-string values from excludeLevels", () => {
     const config = parseLogConfig({ excludeLevels: ["debug", 42, null, "info"] });
     expect(config.excludeLevels).toEqual(["debug", "info"]);
+  });
+});
+
+// ─── ISI-999 M3: redaction in the OTLP log bridge ───────────────────────
+
+describe("toAnyValue redaction (ISI-999 M3)", () => {
+  it("redacts string scalars before they leave the log bridge", () => {
+    expect(toAnyValue("Authorization: Bearer abcdef1234567890ABCDEF")).toBe(
+      "Authorization: Bearer [REDACTED_TOKEN]",
+    );
+    expect(toAnyValue("user bob@example.com signed in")).toBe(
+      "user [REDACTED_EMAIL] signed in",
+    );
+  });
+
+  it("recursively redacts strings inside nested attribute payloads", () => {
+    const result = toAnyValue({
+      header: "Authorization: Bearer abcdef1234567890ABCDEF",
+      meta: {
+        actor: "alice@example.com",
+        count: 3,
+        enabled: true,
+        nested: ["sk-abcdefghijklmnopqrstuv", 42],
+      },
+    });
+    expect(result).toEqual({
+      header: "Authorization: Bearer [REDACTED_TOKEN]",
+      meta: {
+        actor: "[REDACTED_EMAIL]",
+        count: 3,
+        enabled: true,
+        nested: ["[REDACTED_API_KEY]", 42],
+      },
+    });
+  });
+
+  it("passes numbers, booleans, null, and Uint8Array through unchanged", () => {
+    expect(toAnyValue(42)).toBe(42);
+    expect(toAnyValue(true)).toBe(true);
+    expect(toAnyValue(null)).toBe(null);
+    expect(toAnyValue(undefined)).toBe(undefined);
+    const bytes = new Uint8Array([1, 2, 3]);
+    expect(toAnyValue(bytes)).toBe(bytes);
   });
 });
