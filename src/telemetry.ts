@@ -32,7 +32,9 @@ import {
   METRIC_TOKEN_USAGE,
   OC_SCHEMA_VERSION,
   OPENCLAW_SCHEMA_VERSION,
+  OTEL_SCHEMA_URL,
 } from "./semconv.js";
+import { PLUGIN_VERSION } from "./version.js";
 
 /**
  * Env var set by instrumentation/preload.mjs when OpenClaw is launched with
@@ -200,13 +202,20 @@ export interface OtelGauges {
 export function initTelemetry(config: OtelObservabilityConfig, logger: any): TelemetryRuntime {
   const resourceAttrs: Record<string, string> = {
     [ATTR_SERVICE_NAME]: config.serviceName,
-    [ATTR_SERVICE_VERSION]: "0.1.0",
+    // ISI-995: emit the real plugin version (from openclaw.plugin.json)
+    // instead of the legacy hard-coded "0.1.0" placeholder, so
+    // version-comparison dashboards see actual plugin upgrades.
+    [ATTR_SERVICE_VERSION]: PLUGIN_VERSION,
     "openclaw.plugin": "otel-observability",
     [OC_SCHEMA_VERSION]: OPENCLAW_SCHEMA_VERSION,
     ...config.resourceAttributes,
   };
 
-  const resource = resourceFromAttributes(resourceAttrs);
+  // ISI-995: attach the OTel semconv schema URL to the Resource so
+  // backends know which generation of attribute names this plugin emits.
+  const resource = resourceFromAttributes(resourceAttrs, {
+    schemaUrl: OTEL_SCHEMA_URL,
+  });
 
   // Resolve endpoint suffixes for HTTP protocol
   const traceEndpoint =
@@ -314,8 +323,11 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
 
   // ── Instruments ─────────────────────────────────────────────────
 
-  const tracer = trace.getTracer("openclaw-observability", "0.1.0");
-  const meter = metrics.getMeter("openclaw-observability", "0.1.0");
+  // Instrumentation-scope version mirrors the plugin version emitted on
+  // the Resource (ISI-995) so the scope.version field on every span and
+  // metric tracks the real release.
+  const tracer = trace.getTracer("openclaw-observability", PLUGIN_VERSION);
+  const meter = metrics.getMeter("openclaw-observability", PLUGIN_VERSION);
 
   const counters: OtelCounters = {
     llmRequests: meter.createCounter("openclaw.llm.requests", {

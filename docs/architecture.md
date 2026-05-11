@@ -253,6 +253,7 @@ openclaw.request (root)
 │   gen_ai.conversation.id: "session-abc"
 │   openclaw.session.channel: "whatsapp"
 │   openclaw.session.user_id: "user-42"
+│   user.id: "user-42"
 │
 └── openclaw.agent.turn (child)
     │   gen_ai.operation.name: "invoke_agent"
@@ -377,7 +378,8 @@ openclaw.request (root)
 | `openclaw.tool.result_chars` | Result size |
 | `openclaw.tool.duration_ms` | Tool execution time |
 | `openclaw.session.channel` | Channel (whatsapp, cli, etc.) |
-| `openclaw.session.user_id` | User identifier |
+| `openclaw.session.user_id` | User identifier (kept for backward compatibility — see `user.id`) |
+| `user.id` | OTel-stable end-user id (ISI-995). Mirrors `openclaw.session.user_id` on the `openclaw.session` span so registry-keyed dashboards can correlate sessions on a standard attribute. |
 | `openclaw.prompt.chars` | Prompt character count |
 | `openclaw.session.message_count` | History size fed to LLM |
 | `openclaw.dispatch.duration_ms` | Dispatch phase duration |
@@ -414,6 +416,33 @@ either form keep working. They will be **removed** in schema `1.3.0`
 
 The resource attribute `openclaw.schema.version` carries `1.2.0` on
 every signal so consumers can gate their queries on the schema window.
+
+### Resource identity (ISI-995)
+
+The trace, metric, and log Resources all carry:
+
+- `service.version` resolved at module load from `openclaw.plugin.json`'s
+  `version` field — the legacy hard-coded `"0.1.0"` placeholder is gone,
+  so version-comparison dashboards now see real plugin releases.
+- An OTel semconv `schema_url` (currently
+  `https://opentelemetry.io/schemas/1.39.0`, pinned to the installed
+  `@opentelemetry/semantic-conventions` version) so backends can resolve
+  attribute names against the right registry generation.
+
+### Log-attribute hygiene (ISI-995)
+
+Bridged log records emit OTel-stable `code.function.name`,
+`code.file.path`, and `code.line.number` for the emit site, replacing
+the older `openclaw.log.function`, `openclaw.log.file`, and
+`openclaw.log.line` triplet (which duplicated the same semantics in a
+non-portable namespace and confused log-pipeline filters keyed on
+`code.*`).
+
+The pipeline no longer emits `openclaw.log.trace_id`,
+`openclaw.log.span_id`, or `openclaw.log.trace_flags` either — those
+fields are already on the OTLP LogRecord itself when the active context
+is passed to `emit()`, so the duplicate attribute lines were silent
+double-records.
 
 ---
 
