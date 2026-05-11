@@ -2510,3 +2510,140 @@ describe("content capture policy gating (ISI-1000)", () => {
   });
 });
 
+// ── ISI-994: OTel semconv 2026-04 dual-emit window ──────────────────
+//
+// Schema 1.2.0 dual-emits four groups of legacy attributes alongside
+// their stable replacements during a one-minor-release deprecation
+// window. The legacy keys MUST continue to be emitted exactly where they
+// used to be — these tests pin down both halves of the dual-emit so a
+// premature removal in 1.3.0 cannot quietly land without flipping the
+// expectations explicitly.
+
+describe("ISI-994: GenAI / code semconv dual-emit (schema 1.2.x)", () => {
+  let stopHooks: () => void;
+
+  it("llm_input dual-emits gen_ai.system + gen_ai.provider.name AND code.* legacy + stable", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const llmInput = typedHooks.get("llm_input")!;
+
+    resolve({}, { agentId: "a1", sessionKey: "s-994a" });
+    llmInput(
+      { sessionKey: "s-994a", agentId: "a1", model: "gpt-4o", provider: "openai" },
+      { sessionKey: "s-994a" },
+    );
+
+    const llmCall = spans.find((s) => s.spanName === "openclaw.llm.call");
+    expect(llmCall).toBeDefined();
+
+    // gen_ai provider dual-emit
+    expect(llmCall!.attrs["gen_ai.system"]).toBe("openai");
+    expect(llmCall!.attrs["gen_ai.provider.name"]).toBe("openai");
+
+    // code.* dual-emit: legacy + stable forms must both land
+    expect(llmCall!.attrs["code.function"]).toBe("llm_input");
+    expect(llmCall!.attrs["code.namespace"]).toBe("openclaw.otel.hooks");
+    expect(llmCall!.attrs["code.function.name"]).toBe("openclaw.otel.hooks.llm_input");
+    expect(llmCall!.attrs["code.file.path"]).toBe("src/hooks.ts");
+
+    stopHooks();
+  });
+
+  it("llm_output dual-emits cache_*_tokens (legacy) + cache_*.input_tokens (stable)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const llmInput = typedHooks.get("llm_input")!;
+    const llmOutput = typedHooks.get("llm_output")!;
+
+    resolve({}, { agentId: "a1", sessionKey: "s-994b" });
+    llmInput(
+      { sessionKey: "s-994b", agentId: "a1", model: "gpt-4o", provider: "openai" },
+      { sessionKey: "s-994b" },
+    );
+    llmOutput(
+      {
+        sessionKey: "s-994b",
+        responseModel: "gpt-4o-2024-08-06",
+        usage: {
+          input: 100,
+          output: 50,
+          cacheRead: 800,
+          cacheWrite: 40,
+        },
+      },
+      { sessionKey: "s-994b" },
+    );
+
+    const llmCall = spans.find((s) => s.spanName === "openclaw.llm.call");
+    expect(llmCall).toBeDefined();
+
+    // Legacy keys still emitted
+    expect(llmCall!.attrs["gen_ai.usage.cache_read_tokens"]).toBe(800);
+    expect(llmCall!.attrs["gen_ai.usage.cache_write_tokens"]).toBe(40);
+    // Stable replacements also emitted
+    expect(llmCall!.attrs["gen_ai.usage.cache_read.input_tokens"]).toBe(800);
+    expect(llmCall!.attrs["gen_ai.usage.cache_creation.input_tokens"]).toBe(40);
+
+    stopHooks();
+  });
+
+  it("non-LLM hook spans (session_start) also dual-emit code.* keys", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const sessionStart = typedHooks.get("session_start")!;
+    sessionStart(
+      {
+        sessionKey: "s-994c",
+        agentId: "a1",
+        channel: "cli",
+        userId: "u1",
+      },
+      { sessionKey: "s-994c" },
+    );
+
+    const sessionSpan = spans.find((s) => s.spanName === "openclaw.session");
+    expect(sessionSpan).toBeDefined();
+    expect(sessionSpan!.attrs["code.function"]).toBe("session_start");
+    expect(sessionSpan!.attrs["code.namespace"]).toBe("openclaw.otel.hooks");
+    expect(sessionSpan!.attrs["code.function.name"]).toBe(
+      "openclaw.otel.hooks.session_start",
+    );
+    expect(sessionSpan!.attrs["code.file.path"]).toBe("src/hooks.ts");
+
+    stopHooks();
+  });
+
+  it("dispatch.prepare span dual-emits code.function.name + code.file.path", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const beforeDispatch = typedHooks.get("before_dispatch")!;
+
+    resolve({}, { agentId: "a1", sessionKey: "s-994d" });
+    beforeDispatch(
+      { sessionKey: "s-994d", agentId: "a1", model: "gpt-4o", provider: "openai" },
+      { sessionKey: "s-994d" },
+    );
+
+    const dispatchSpan = spans.find((s) => s.spanName === "openclaw.dispatch.prepare");
+    expect(dispatchSpan).toBeDefined();
+    expect(dispatchSpan!.attrs["code.function"]).toBe("before_dispatch");
+    expect(dispatchSpan!.attrs["code.function.name"]).toBe(
+      "openclaw.otel.hooks.before_dispatch",
+    );
+    expect(dispatchSpan!.attrs["code.file.path"]).toBe("src/hooks.ts");
+
+    stopHooks();
+  });
+});
+
