@@ -696,6 +696,68 @@ describe("model_call_started / model_call_ended hooks (ISI-926)", () => {
     stopHooks();
   });
 
+  it("model_call_ended filters non-string entries from finish_reasons (ISI-993 L1)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const modelStarted = typedHooks.get("model_call_started")!;
+    const modelEnded = typedHooks.get("model_call_ended")!;
+
+    resolve({}, { agentId: "a-mixed", sessionKey: "s-mixed" });
+    modelStarted(
+      { sessionKey: "s-mixed", model: "claude-3.5-sonnet", provider: "anthropic" },
+      { sessionKey: "s-mixed" },
+    );
+    modelEnded(
+      {
+        sessionKey: "s-mixed",
+        responseModel: "claude-3.5-sonnet-20241022",
+        finishReasons: ["stop", null, undefined, 42, "", "tool_use"] as unknown as string[],
+      },
+      { sessionKey: "s-mixed" },
+    );
+
+    const chatSpan = spans.find((s) => s.spanName === "chat claude-3.5-sonnet");
+    expect(chatSpan).toBeDefined();
+    const reasons = chatSpan!.attrs["gen_ai.response.finish_reasons"];
+    expect(Array.isArray(reasons)).toBe(true);
+    expect(reasons).toEqual(["stop", "tool_use"]);
+
+    stopHooks();
+  });
+
+  it("model_call_ended omits finish_reasons when all entries are invalid (ISI-993 L1)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const modelStarted = typedHooks.get("model_call_started")!;
+    const modelEnded = typedHooks.get("model_call_ended")!;
+
+    resolve({}, { agentId: "a-bad", sessionKey: "s-bad" });
+    modelStarted(
+      { sessionKey: "s-bad", model: "claude-3.5-sonnet", provider: "anthropic" },
+      { sessionKey: "s-bad" },
+    );
+    modelEnded(
+      {
+        sessionKey: "s-bad",
+        responseModel: "claude-3.5-sonnet-20241022",
+        finishReasons: [null, undefined, 42, ""] as unknown as string[],
+      },
+      { sessionKey: "s-bad" },
+    );
+
+    const chatSpan = spans.find((s) => s.spanName === "chat claude-3.5-sonnet");
+    expect(chatSpan).toBeDefined();
+    expect(chatSpan!.attrs["gen_ai.response.finish_reasons"]).toBeUndefined();
+
+    stopHooks();
+  });
+
   it("model_call_ended records error on span when event.error is set", () => {
     const { api, typedHooks } = createStubApi();
     const { telemetry, spans } = createTelemetry();

@@ -20,6 +20,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     `generate_content`, `invoke_agent`, `invoke_workflow`, `retrieval`,
     `text_completion`). Cron context remains available via `openclaw.cron.*`.
 
+### Fixed
+
+- **`gen_ai.response.finish_reasons` array hardening (ISI-993).** Non-string
+  entries (`null`, `undefined`, numbers, empty strings) are now filtered out
+  of the array before the attribute is set. If the array contains no valid
+  strings after filtering, the attribute is omitted entirely. This prevents
+  malformed upstream events from emitting non-spec data via the unchecked
+  TypeScript cast that landed in the initial Story 1 fix.
+
 ### Breaking
 
 - **Tool-approval attributes moved out of the reserved `gen_ai.*` namespace

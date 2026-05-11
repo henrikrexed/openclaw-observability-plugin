@@ -704,7 +704,12 @@ export function registerHooks(
           span.setAttribute(GEN_AI_RESPONSE_ID, responseId);
         }
         if (Array.isArray(finishReasons) && finishReasons.length > 0) {
-          span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, finishReasons as string[]);
+          const cleanReasons = finishReasons.filter(
+            (r): r is string => typeof r === "string" && r.length > 0,
+          );
+          if (cleanReasons.length > 0) {
+            span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, cleanReasons);
+          }
         } else if (typeof finishReasons === "string" && finishReasons) {
           span.setAttribute(GEN_AI_RESPONSE_FINISH_REASONS, [finishReasons]);
         }
