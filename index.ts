@@ -30,7 +30,7 @@
  */
 
 import { parseConfig, type OtelObservabilityConfig } from "./src/config.js";
-import { initTelemetry, type TelemetryRuntime } from "./src/telemetry.js";
+import { initTelemetry, hasPreloadedOtelSdk, type TelemetryRuntime } from "./src/telemetry.js";
 import { initOpenLLMetry } from "./src/openllmetry.js";
 import { registerHooks } from "./src/hooks.js";
 import { registerDiagnosticsListener, hasDiagnosticsSupport } from "./src/diagnostics.js";
@@ -151,7 +151,7 @@ const otelObservabilityPlugin = {
         // already active with a mismatched value, LLM-client spans will
         // reflect the preload's value (not the plugin config) — warn so
         // operators know to set the env var before launching the gateway.
-        const preloadActive = (globalThis as any).__OPENCLAW_OTEL_PRELOAD_ACTIVE === true;
+        const preloadActive = hasPreloadedOtelSdk();
         const preloadResolved = (globalThis as any).__OPENCLAW_OTEL_CAPTURE_CONTENT;
         if (preloadActive && preloadResolved !== config.captureContent) {
           logger.warn(

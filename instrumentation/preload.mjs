@@ -54,6 +54,9 @@ sdk.start();
 
 // Signal to the plugin that preload is active, and publish the resolved
 // traceContent state so the plugin can detect config/env mismatches.
+// The env var survives subprocess forks (NODE_OPTIONS is inherited), while
+// the globalThis flag is kept for backward-compat with same-process callers.
+process.env.OPENCLAW_OTEL_PRELOADED = "1";
 globalThis.__OPENCLAW_OTEL_PRELOAD_ACTIVE = true;
 globalThis.__OPENCLAW_OTEL_CAPTURE_CONTENT = TRACE_CONTENT;
 

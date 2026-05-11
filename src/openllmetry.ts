@@ -12,10 +12,10 @@
  */
 
 import type { OtelObservabilityConfig } from "./config.js";
+import { hasPreloadedOtelSdk } from "./telemetry.js";
 
 export async function initOpenLLMetry(_config: OtelObservabilityConfig, logger: any): Promise<void> {
-  // Check if preload instrumentation is active (it sets a global flag)
-  const preloadActive = (globalThis as any).__OPENCLAW_OTEL_PRELOAD_ACTIVE === true;
+  const preloadActive = hasPreloadedOtelSdk();
 
   if (preloadActive) {
     logger.info("[otel] ✅ GenAI instrumentation active via NODE_OPTIONS preload");
