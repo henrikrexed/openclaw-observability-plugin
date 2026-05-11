@@ -4,6 +4,36 @@ All notable changes to the `@henrikrexed/openclaw-otel-observability` plugin are
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **OpenClaw attribute schema bumped to `1.1.0` (ISI-993).** Three call sites
+  that emitted invalid OpenTelemetry GenAI semantic-convention data are now
+  registry-compliant:
+  - `gen_ai.response.finish_reasons` now emits as `string[]` (it was previously
+    a comma-joined string). Consumers reading the attribute should expect an
+    array on captured spans.
+  - The invalid `gen_ai.operation.name = "cron_executed"` attribute is no
+    longer set on `openclaw.cron.exec` spans; the registry only allows the
+    nine standard values (`chat`, `create_agent`, `embeddings`, `execute_tool`,
+    `generate_content`, `invoke_agent`, `invoke_workflow`, `retrieval`,
+    `text_completion`). Cron context remains available via `openclaw.cron.*`.
+
+### Breaking
+
+- **Tool-approval attributes moved out of the reserved `gen_ai.*` namespace
+  (ISI-993).** The OTel registry reserves `gen_ai.*` for standardised
+  attributes; the plugin's custom approval keys have been renamed to the
+  plugin-domain namespace:
+  - `gen_ai.tool.approval.requested` → `openclaw.tool.approval.requested`
+  - `gen_ai.tool.approval.resolution` → `openclaw.tool.approval.resolution`
+  - `gen_ai.tool.approval.duration_ms` → `openclaw.tool.approval.duration_ms`
+
+  Dashboards or alert rules filtering on the old `gen_ai.tool.approval.*` keys
+  must be updated. `OPENCLAW_SCHEMA_VERSION` is bumped from `1.0.0` to `1.1.0`
+  so consumers can detect the rename.
+
 ## [0.3.1] — 2026-05-10
 
 ### Added

@@ -368,9 +368,9 @@ openclaw.request (root)
 | `gen_ai.request.stream` | Whether streaming |
 | `gen_ai.request.max_tokens` | Max token limit |
 | `gen_ai.provider.name` | Provider name |
-| `gen_ai.tool.approval.requested` | Approval required |
-| `gen_ai.tool.approval.resolution` | Approved/denied |
-| `gen_ai.tool.approval.duration_ms` | Approval wait time |
+| `openclaw.tool.approval.requested` | Approval required (renamed from `gen_ai.tool.approval.requested` in schema 1.1.0) |
+| `openclaw.tool.approval.resolution` | Approved/denied (renamed from `gen_ai.tool.approval.resolution` in schema 1.1.0) |
+| `openclaw.tool.approval.duration_ms` | Approval wait time (renamed from `gen_ai.tool.approval.duration_ms` in schema 1.1.0) |
 | `openclaw.agent.id` | Agent identifier |
 | `openclaw.tool.name` | Tool name |
 | `openclaw.tool.call_id` | Tool call UUID |
