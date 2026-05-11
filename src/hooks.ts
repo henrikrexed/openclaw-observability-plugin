@@ -37,7 +37,12 @@ import { SpanKind, SpanStatusCode, context, trace, type Span, type Context } fro
 import type { TelemetryRuntime } from "./telemetry.js";
 import type { OtelObservabilityConfig } from "./config.js";
 import { activeAgentSpans, getPendingUsage, enrichSpanWithUsage, hasDiagnosticsSupport } from "./diagnostics.js";
-import { checkToolSecurity, checkMessageSecurity, type SecurityCounters } from "./security.js";
+import {
+  checkToolSecurity,
+  checkMessageSecurity,
+  redactSensitiveText,
+  type SecurityCounters,
+} from "./security.js";
 import { TraceContextStore } from "./trace-context-store.js";
 import {
   GEN_AI_AGENT_ID,
@@ -123,7 +128,8 @@ export function registerHooks(
 
   function setToolInputPreview(span: any, toolInput: any): void {
     if (toolInput && typeof toolInput === "object") {
-      span.setAttribute("openclaw.tool.input_preview", JSON.stringify(toolInput).slice(0, 1000));
+      const preview = JSON.stringify(toolInput).slice(0, 1000);
+      span.setAttribute("openclaw.tool.input_preview", redactSensitiveText(preview));
     }
   }
 

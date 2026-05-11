@@ -188,6 +188,64 @@ export function detectDangerousCommand(
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// SENSITIVE VALUE REDACTION
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Patterns for sensitive values that may appear inside attribute strings
+ * (tool input previews, security event descriptions, log records). Each
+ * entry is applied with `String.prototype.replace`, so every pattern uses
+ * the global flag and a placeholder that names the match class.
+ *
+ * Order matters: more specific token patterns must run before the generic
+ * email/bearer rules so they don't get re-redacted as a different class.
+ */
+const SENSITIVE_VALUE_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
+  // OpenAI / Anthropic / generic provider API keys (sk-..., sk-ant-...)
+  { pattern: /\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}\b/g, replacement: "[REDACTED_API_KEY]" },
+  // GitHub personal access tokens & app tokens (ghp_, gho_, ghu_, ghs_, ghr_)
+  { pattern: /\bgh[pousr]_[A-Za-z0-9]{20,}\b/g, replacement: "[REDACTED_GITHUB_TOKEN]" },
+  // AWS access key IDs (AKIA / ASIA + 16 base32 chars)
+  { pattern: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, replacement: "[REDACTED_AWS_KEY]" },
+  // JWTs — three base64url segments separated by dots
+  {
+    pattern: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g,
+    replacement: "[REDACTED_JWT]",
+  },
+  // Authorization: Bearer <token>
+  {
+    pattern: /\b[Bb]earer\s+[A-Za-z0-9._~+/=-]{16,}/g,
+    replacement: "Bearer [REDACTED_TOKEN]",
+  },
+  // Authorization: Basic <base64>
+  {
+    pattern: /\b[Bb]asic\s+[A-Za-z0-9+/=]{16,}/g,
+    replacement: "Basic [REDACTED_CREDENTIALS]",
+  },
+  // Email addresses
+  {
+    pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
+    replacement: "[REDACTED_EMAIL]",
+  },
+];
+
+/**
+ * Scrub common sensitive values (API keys, tokens, emails) from a string
+ * before it is exposed as a span attribute, log record, or event payload.
+ *
+ * Non-string and empty inputs are returned unchanged so callers can hand
+ * over arbitrary `JSON.stringify` output without pre-checking.
+ */
+export function redactSensitiveText(text: string): string {
+  if (typeof text !== "string" || text.length === 0) return text;
+  let out = text;
+  for (const { pattern, replacement } of SENSITIVE_VALUE_PATTERNS) {
+    out = out.replace(pattern, replacement);
+  }
+  return out;
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // SPAN ENRICHMENT
 // ═══════════════════════════════════════════════════════════════════
 
@@ -201,7 +259,7 @@ export function enrichSpanWithSecurityEvent(
   span.setAttribute("security.event.detected", true);
   span.setAttribute("security.event.detection", event.detection);
   span.setAttribute("security.event.severity", event.severity);
-  span.setAttribute("security.event.description", event.description);
+  span.setAttribute("security.event.description", redactSensitiveText(event.description));
   span.setAttribute("security.event.timestamp", event.timestamp);
   
   // Set span status based on severity
@@ -216,7 +274,7 @@ export function enrichSpanWithSecurityEvent(
   span.addEvent("security.alert", {
     "security.detection": event.detection,
     "security.severity": event.severity,
-    "security.description": event.description,
+    "security.description": redactSensitiveText(event.description),
   });
 }
 
