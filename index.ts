@@ -62,8 +62,8 @@ const otelObservabilityPlugin = {
   },
 
   register(api: any) {
-    const config = parseConfig(api.pluginConfig);
     const logger = api.logger;
+    const config = parseConfig(api.pluginConfig, logger);
 
     let telemetry: TelemetryRuntime | null = null;
     let logPipeline: LogPipelineRuntime | null = null;

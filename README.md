@@ -369,7 +369,7 @@ In your backend, look for an `openclaw.request` span with at least one `openclaw
 | `diagnostics.otel.traces` | boolean | true | Enable traces |
 | `diagnostics.otel.metrics` | boolean | true | Enable metrics |
 | `diagnostics.otel.logs` | boolean | false | Enable logs |
-| `diagnostics.otel.sampleRate` | number | (unset) | Head-based trace sampling rate, 0.0–1.0. Wraps `TraceIdRatioBasedSampler` in `ParentBasedSampler` so child spans inherit the root decision. Omit (or use `1.0`) to keep all traces. |
+| `diagnostics.otel.sampleRate` | number | (unset) | Head-based trace sampling rate, 0.0–1.0. Wraps `TraceIdRatioBasedSampler` in `ParentBasedSampler` so child spans inherit the root decision. Omit (or use `1.0`) to keep all traces. **Overrides `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG`** — the plugin builds the sampler directly and never reads those env vars; see [Trace Sampling](docs/configuration.md#trace-sampling) for precedence rules. |
 
 ### Custom Plugin Options
 

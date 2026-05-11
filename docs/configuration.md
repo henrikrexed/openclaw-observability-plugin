@@ -50,7 +50,7 @@ OpenTelemetry export configuration.
 | `traces` | boolean | `true` | Enable trace export |
 | `metrics` | boolean | `true` | Enable metrics export |
 | `logs` | boolean | `false` | Enable log forwarding |
-| `sampleRate` | number | — | Trace sampling rate, `0.0`–`1.0`. Omit to use the SDK default (`parentbased_always_on`). See [Trace Sampling](#trace-sampling). |
+| `sampleRate` | number | — | Trace sampling rate, `0.0`–`1.0`. Omit to use the SDK default (`parentbased_always_on`). **Overrides `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG`** — see [Trace Sampling](#trace-sampling) for precedence rules. |
 | `flushIntervalMs` | number | — | Export flush interval in milliseconds |
 
 ## Endpoint Configuration
@@ -260,7 +260,20 @@ Semantics:
 
 Sampling is head-based and parent-respecting: the plugin wires a `ParentBasedSampler` around a `TraceIdRatioBasedSampler`. The root span of a trace makes the sampling decision based on the trace ID; child spans inherit the parent's decision so distributed traces stay coherent and you never see "half a trace".
 
-Invalid values (negative, > 1, `NaN`, non-numeric) are ignored and the SDK default (`parentbased_always_on`) is used instead.
+Invalid values (negative, > 1, `NaN`, non-numeric, `null`, plain object) are ignored and the SDK default (`parentbased_always_on`) is used instead. The plugin emits a `[otel] Ignoring invalid sampleRate=…` warn-level log line whenever it drops a present-but-invalid value, so silent typos like `"sampleRate": "0.5"` (string) or `1.5` (out-of-range) are visible in operator logs instead of quietly disabling head-based sampling.
+
+### Precedence vs. `OTEL_TRACES_SAMPLER` env vars
+
+OpenTelemetry SDKs typically read the `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG` environment variables to choose a default sampler. **This plugin does not.** When `sampleRate` is set in plugin config, the plugin builds the sampler directly (`ParentBased(TraceIdRatio(sampleRate))`) and the env vars have no effect on the plugin's tracer provider. When `sampleRate` is omitted, the plugin omits the `sampler` key entirely so the SDK's default (`parentbased_always_on`) applies — and even in that case, the plugin does not propagate `OTEL_TRACES_SAMPLER` to its provider.
+
+Operators migrating from other OTel SDKs should configure sampling via `diagnostics.otel.sampleRate` rather than the env vars. The precedence is:
+
+| Configuration                                                  | Effective sampler                                          |
+| -------------------------------------------------------------- | ---------------------------------------------------------- |
+| `sampleRate` set (any valid value)                             | `ParentBased(TraceIdRatio(sampleRate))` — env vars ignored |
+| `sampleRate` omitted; `OTEL_TRACES_SAMPLER` set                | SDK default (`parentbased_always_on`) — env vars ignored   |
+| `sampleRate` omitted; no env vars                              | SDK default (`parentbased_always_on`)                      |
+| `sampleRate` present but invalid (e.g. `"0.5"` string, `1.5`)  | SDK default — plugin emits a `logger.warn` diagnostic      |
 
 ## `captureContent` (gateway-launch setting)
 
