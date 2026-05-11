@@ -12,6 +12,7 @@ import { trace, context } from "@opentelemetry/api";
 import type { OtelObservabilityConfig } from "./config.js";
 import type { TelemetryRuntime } from "./telemetry.js";
 import { OC_SCHEMA_VERSION, OPENCLAW_SCHEMA_VERSION } from "./semconv.js";
+import { redactSensitiveText } from "./security.js";
 
 type LogEvent = {
   type?: string;
@@ -155,11 +156,15 @@ export function parseLogConfig(raw: unknown): LogPipelineConfig {
   };
 }
 
-function toAnyValue(value: unknown): AnyValue {
+// Exported for unit tests — see tests/logs.test.ts. Runtime callers should
+// keep going through emit(), which already routes string bodies/attrs
+// through redaction before this helper runs.
+export function toAnyValue(value: unknown): AnyValue {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string") {
+    return redactSensitiveText(value);
+  }
   if (
-    value === null ||
-    value === undefined ||
-    typeof value === "string" ||
     typeof value === "number" ||
     typeof value === "boolean"
   ) {
@@ -178,7 +183,7 @@ function toAnyValue(value: unknown): AnyValue {
     }
     return map;
   }
-  return String(value);
+  return redactSensitiveText(String(value));
 }
 
 export function initLogPipeline(
@@ -265,10 +270,16 @@ export function initLogPipeline(
 
       const timestamp = evt.timestamp || Date.now();
 
+      // Redact the body before emit. Log bodies can carry copy-pasted
+      // tokens, emails, or auth headers; the OTLP exporter will ship
+      // them straight to the backend otherwise.
+      const rawBody = evt.message || evt.body || "";
+      const body = typeof rawBody === "string" ? redactSensitiveText(rawBody) : rawBody;
+
       otelLogger.emit({
         severityNumber,
         severityText,
-        body: evt.message || evt.body || "",
+        body,
         attributes,
         timestamp: typeof timestamp === "number" ? timestamp * 1_000_000 : timestamp,
         observedTimestamp: Date.now() * 1_000_000,

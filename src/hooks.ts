@@ -37,7 +37,13 @@ import { SpanKind, SpanStatusCode, context, trace, type Span, type Context } fro
 import type { TelemetryRuntime } from "./telemetry.js";
 import type { OtelObservabilityConfig } from "./config.js";
 import { activeAgentSpans, getPendingUsage, enrichSpanWithUsage, hasDiagnosticsSupport } from "./diagnostics.js";
-import { checkToolSecurity, checkMessageSecurity, type SecurityCounters } from "./security.js";
+import {
+  checkToolSecurity,
+  checkMessageSecurity,
+  redactSensitiveText,
+  setRedactedAttribute,
+  type SecurityCounters,
+} from "./security.js";
 import { TraceContextStore } from "./trace-context-store.js";
 import {
   GEN_AI_AGENT_ID,
@@ -123,7 +129,10 @@ export function registerHooks(
 
   function setToolInputPreview(span: any, toolInput: any): void {
     if (toolInput && typeof toolInput === "object") {
-      span.setAttribute("openclaw.tool.input_preview", JSON.stringify(toolInput).slice(0, 1000));
+      const preview = JSON.stringify(toolInput).slice(0, 1000);
+      // Always route through setRedactedAttribute so this attribute key
+      // never bypasses redaction, even if the call site is copy-pasted.
+      setRedactedAttribute(span, "openclaw.tool.input_preview", preview);
     }
   }
 
@@ -175,7 +184,11 @@ export function registerHooks(
             sessionKey
           );
           if (securityEvent) {
-            logger.warn?.(`[otel] SECURITY: ${securityEvent.detection} - ${securityEvent.description}`);
+            // Redact before logging: the gateway logger is piped to the
+            // OTLP log bridge in production, and an un-redacted description
+            // would otherwise exfiltrate any sensitive value the detection
+            // captured (e.g. a path / command fragment containing a token).
+            logger.warn?.(`[otel] SECURITY: ${securityEvent.detection} - ${redactSensitiveText(securityEvent.description)}`);
           }
         }
 
@@ -1117,7 +1130,11 @@ export function registerHooks(
             agentId
           );
           if (securityEvent) {
-            logger.warn?.(`[otel] SECURITY: ${securityEvent.detection} - ${securityEvent.description}`);
+            // Redact before logging: the gateway logger is piped to the
+            // OTLP log bridge in production, and an un-redacted description
+            // would otherwise exfiltrate any sensitive value the detection
+            // captured (e.g. a path / command fragment containing a token).
+            logger.warn?.(`[otel] SECURITY: ${securityEvent.detection} - ${redactSensitiveText(securityEvent.description)}`);
             setToolInputPreview(span, toolInput);
           }
 
