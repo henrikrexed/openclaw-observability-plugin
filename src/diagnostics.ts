@@ -18,6 +18,11 @@ import {
   GEN_AI_TOKEN_TYPE,
   GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
   GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
+  GEN_AI_USAGE_CACHE_READ_TOKENS,
+  GEN_AI_USAGE_CACHE_WRITE_TOKENS,
+  GEN_AI_USAGE_INPUT_TOKENS,
+  GEN_AI_USAGE_OUTPUT_TOKENS,
+  GEN_AI_USAGE_TOTAL_TOKENS,
   OP_INVOKE_AGENT,
   OC_PROVIDER,
   TOKEN_TYPE_INPUT,
@@ -190,22 +195,22 @@ export function enrichSpanWithUsage(span: Span, data: PendingUsageData): void {
 
   // GenAI semantic convention attributes
   if (usage.input !== undefined) {
-    span.setAttribute("gen_ai.usage.input_tokens", usage.input);
+    span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, usage.input);
   }
   if (usage.output !== undefined) {
-    span.setAttribute("gen_ai.usage.output_tokens", usage.output);
+    span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, usage.output);
   }
   if (usage.total !== undefined) {
-    span.setAttribute("gen_ai.usage.total_tokens", usage.total);
+    span.setAttribute(GEN_AI_USAGE_TOTAL_TOKENS, usage.total);
   }
   // Dual-emit legacy (`cache_*_tokens`) + stable (`cache_*.input_tokens`)
   // forms during the schema 1.2.x deprecation window.
   if (usage.cacheRead !== undefined) {
-    span.setAttribute("gen_ai.usage.cache_read_tokens", usage.cacheRead);
+    span.setAttribute(GEN_AI_USAGE_CACHE_READ_TOKENS, usage.cacheRead);
     span.setAttribute(GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS, usage.cacheRead);
   }
   if (usage.cacheWrite !== undefined) {
-    span.setAttribute("gen_ai.usage.cache_write_tokens", usage.cacheWrite);
+    span.setAttribute(GEN_AI_USAGE_CACHE_WRITE_TOKENS, usage.cacheWrite);
     span.setAttribute(GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, usage.cacheWrite);
   }
 
@@ -229,7 +234,7 @@ export function enrichSpanWithUsage(span: Span, data: PendingUsageData): void {
     span.setAttribute(GEN_AI_PROVIDER_NAME, data.provider);
   }
   if (data.model) {
-    span.setAttribute("gen_ai.response.model", data.model);
+    span.setAttribute(GEN_AI_RESPONSE_MODEL, data.model);
   }
 }
 

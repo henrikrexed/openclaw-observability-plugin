@@ -80,7 +80,6 @@ import {
   CODE_NAMESPACE,
   CODE_FUNCTION_NAME,
   CODE_FILE_PATH,
-  CODE_LINE_NUMBER,
   ERROR_TYPE,
   spanNameExecuteTool,
   spanNameChat,
@@ -109,15 +108,18 @@ const CODE_FILE = "src/hooks.ts";
  * (`code.function.name` / `code.file.path`) attributes for a hook span.
  * Spread the result into the span `attributes` block.
  *
+ * `filePath` defaults to this module's `CODE_FILE`; callers from other
+ * modules MUST pass their own path so `code.file.path` does not lie.
+ *
  * Centralised so the deprecation window can be closed in one place
  * (schema `1.3.0`) by dropping the legacy keys from this helper.
  */
-function codeAttrs(funcName: string): Record<string, string> {
+function codeAttrs(funcName: string, filePath: string = CODE_FILE): Record<string, string> {
   return {
     [CODE_FUNCTION]: funcName,
     [CODE_NAMESPACE]: CODE_NS,
     [CODE_FUNCTION_NAME]: `${CODE_NS}.${funcName}`,
-    [CODE_FILE_PATH]: CODE_FILE,
+    [CODE_FILE_PATH]: filePath,
   };
 }
 
@@ -690,10 +692,10 @@ export function registerHooks(
 
         llmSpan.setAttribute(GEN_AI_RESPONSE_MODEL, responseModel);
         if (inputTokens > 0) {
-          llmSpan.setAttribute("gen_ai.usage.input_tokens", inputTokens);
+          llmSpan.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, inputTokens);
         }
         if (outputTokens > 0) {
-          llmSpan.setAttribute("gen_ai.usage.output_tokens", outputTokens);
+          llmSpan.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, outputTokens);
         }
         // Dual-emit legacy (`cache_*_tokens`) + stable (`cache_*.input_tokens`)
         // forms during the schema 1.2.x deprecation window.
@@ -879,7 +881,7 @@ export function registerHooks(
           span.setAttribute(GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, cacheCreationInputTokens);
         }
         if (totalTokens > 0) {
-          span.setAttribute("gen_ai.usage.total_tokens", totalTokens);
+          span.setAttribute(GEN_AI_USAGE_TOTAL_TOKENS, totalTokens);
         }
 
         const durationMs =
@@ -1698,10 +1700,10 @@ export function registerHooks(
           try {
             // Populate token data from agent_end diagnostics if available
             if (totalInputTokens > 0) {
-              sessionCtx.llmSpan.setAttribute("gen_ai.usage.input_tokens", totalInputTokens);
+              sessionCtx.llmSpan.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, totalInputTokens);
             }
             if (totalOutputTokens > 0) {
-              sessionCtx.llmSpan.setAttribute("gen_ai.usage.output_tokens", totalOutputTokens);
+              sessionCtx.llmSpan.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, totalOutputTokens);
             }
             // Dual-emit legacy + stable cache attribute forms.
             if (cacheReadTokens > 0) {
@@ -1770,10 +1772,10 @@ export function registerHooks(
           }
 
           // Token usage — GenAI semantic convention attributes
-          agentSpan.setAttribute("gen_ai.usage.input_tokens", totalInputTokens);
-          agentSpan.setAttribute("gen_ai.usage.output_tokens", totalOutputTokens);
-          agentSpan.setAttribute("gen_ai.usage.total_tokens", totalTokens);
-          agentSpan.setAttribute("gen_ai.response.model", model);
+          agentSpan.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, totalInputTokens);
+          agentSpan.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, totalOutputTokens);
+          agentSpan.setAttribute(GEN_AI_USAGE_TOTAL_TOKENS, totalTokens);
+          agentSpan.setAttribute(GEN_AI_RESPONSE_MODEL, model);
           agentSpan.setAttribute("openclaw.agent.success", success);
 
           if (diagUsage?.provider) {

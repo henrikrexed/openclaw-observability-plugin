@@ -48,6 +48,18 @@ V3 emits both GenAI stable attributes (`gen_ai.*`) and legacy attributes (`openc
 >
 > Reason: the `gen_ai.*` namespace is reserved for the OTel registry. Dashboards filtering on the old keys must be updated. `gen_ai.response.finish_reasons` is also now emitted as `string[]` (was previously a comma-joined string).
 
+> **Schema 1.2.0 (ISI-994) — OTel GenAI / code semconv 2026-04 dual-emit window.** Spans and metrics that previously emitted deprecated attribute keys now also emit the stable replacements alongside the legacy ones for one minor release (planned removal at schema `1.3.0` / plugin `0.5.0`):
+>
+> | Legacy attribute | Stable replacement |
+> |------------------|--------------------|
+> | `gen_ai.system` | `gen_ai.provider.name` |
+> | `code.function` + `code.namespace` | `code.function.name` (= `${namespace}.${function}`) + `code.file.path` |
+> | `gen_ai.usage.cache_read_tokens` | `gen_ai.usage.cache_read.input_tokens` |
+> | `gen_ai.usage.cache_write_tokens` | `gen_ai.usage.cache_creation.input_tokens` |
+> | `gen_ai.usage.total_tokens` | *(none — compute `input + output`)* — kept, marked `@deprecated` |
+>
+> Update dashboards / DQL queries to the stable form before the plugin moves to `1.3.0`. The full migration table and consumer checklist live in [`docs/architecture.md`](./architecture.md#deprecated-attributes--dual-emit-window-schema-12x). The resource attribute `openclaw.schema.version` carries `1.2.0` on every signal so consumers can gate queries on the schema window.
+
 **New openclaw attributes:**
 - `openclaw.session.channel`, `openclaw.session.user_id`, `openclaw.session.duration_ms`
 - `openclaw.dispatch.duration_ms`

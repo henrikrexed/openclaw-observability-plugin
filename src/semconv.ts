@@ -102,8 +102,6 @@ export const CODE_NAMESPACE = "code.namespace";
 export const CODE_FUNCTION_NAME = "code.function.name";
 /** Stable: repo-relative source file path of the emit site. */
 export const CODE_FILE_PATH = "code.file.path";
-/** Stable: 1-based source line number of the emit site (when known). */
-export const CODE_LINE_NUMBER = "code.line.number";
 
 // ── Plugin-domain (legacy) attribute keys ───────────────────────────
 export const OC_AGENT_ID = "openclaw.agent.id";
@@ -159,7 +157,7 @@ export const OC_CRON_AGENT_ID = "openclaw.cron.agent_id";
  * migration: spans that previously emitted `gen_ai.system`,
  * `code.function` / `code.namespace`, or `gen_ai.usage.cache_*_tokens`
  * now also emit the stable replacements (`gen_ai.provider.name`,
- * `code.function.name` (+ optional `code.file.path` / `code.line.number`),
+ * `code.function.name` + `code.file.path`,
  * `gen_ai.usage.cache_read.input_tokens` /
  * `gen_ai.usage.cache_creation.input_tokens`). The legacy keys (and
  * `gen_ai.usage.total_tokens`) are kept for backward compatibility for

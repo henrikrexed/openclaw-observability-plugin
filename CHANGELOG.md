@@ -34,9 +34,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
     forward.
 
   **Planned removal:** schema `1.3.0` / plugin `0.5.0`. The deprecation
-  window is one minor release; the follow-up removal task is filed as a
-  child of [ISI-992](https://github.com/henrikrexed/openclaw-o11y-plugin).
-  See `docs/otel-integration.md#deprecated-attributes--dual-emit-window`
+  window is one minor release; the follow-up removal task is filed as
+  ISI-1004 (a child of the ISI-992 epic).
+  See [`docs/architecture.md#deprecated-attributes--dual-emit-window-schema-12x`](./docs/architecture.md#deprecated-attributes--dual-emit-window-schema-12x)
   for the full migration table and the consumer-side update checklist.
 - **Granular content capture policy (ISI-1000).** The `captureContent`
   plugin option now accepts a `ContentCapturePolicy` object with five
