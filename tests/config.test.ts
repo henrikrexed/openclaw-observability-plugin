@@ -10,7 +10,7 @@
  *     the plugin falls back to the SDK default sampler.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   CONTENT_POLICY_DISABLED,
@@ -158,5 +158,75 @@ describe("parseConfig — sampleRate", () => {
 
   it("rejects non-number types", () => {
     expect(parseConfig({ sampleRate: "0.5" }).sampleRate).toBeUndefined();
+  });
+
+  // ── ISI-1003 — additional edge cases real-world configs produce ──
+  it("rejects explicit null (e.g. JSON `null`)", () => {
+    expect(parseConfig({ sampleRate: null }).sampleRate).toBeUndefined();
+  });
+
+  it("rejects -Infinity", () => {
+    expect(
+      parseConfig({ sampleRate: Number.NEGATIVE_INFINITY }).sampleRate,
+    ).toBeUndefined();
+  });
+
+  it("rejects plain object (e.g. accidentally nested)", () => {
+    expect(
+      parseConfig({ sampleRate: { value: 0.5 } as any }).sampleRate,
+    ).toBeUndefined();
+  });
+});
+
+// ── ISI-1003 — Minor #3 — logger.warn on silent sampleRate validation drop ──
+describe("parseConfig — sampleRate diagnostics", () => {
+  it("does not warn when sampleRate is omitted", () => {
+    const warn = vi.fn();
+    parseConfig({}, { warn });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("does not warn when sampleRate is valid", () => {
+    const warn = vi.fn();
+    parseConfig({ sampleRate: 0.25 }, { warn });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("warns when sampleRate is present but out of range", () => {
+    const warn = vi.fn();
+    parseConfig({ sampleRate: 1.5 }, { warn });
+    expect(warn).toHaveBeenCalledTimes(1);
+    const msg = warn.mock.calls[0]![0]!;
+    expect(msg).toContain("sampleRate");
+    expect(msg).toContain("1.5");
+    expect(msg).toContain("parentbased_always_on");
+  });
+
+  it("warns when sampleRate is a string typo and reports the rejected value", () => {
+    const warn = vi.fn();
+    parseConfig({ sampleRate: "0.5" }, { warn });
+    expect(warn).toHaveBeenCalledTimes(1);
+    const msg = warn.mock.calls[0]![0]!;
+    expect(msg).toContain('"0.5"');
+    expect(msg).toContain("typeof=string");
+  });
+
+  it("warns when sampleRate is explicit null", () => {
+    const warn = vi.fn();
+    parseConfig({ sampleRate: null }, { warn });
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("warns when sampleRate is NaN", () => {
+    const warn = vi.fn();
+    parseConfig({ sampleRate: Number.NaN }, { warn });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]!).toContain("NaN");
+  });
+
+  it("does not warn (no logger) when called without a logger", () => {
+    // Belt-and-suspenders: ensures the configSchema.parse() codepath
+    // (which has no logger handy) stays silent and does not throw.
+    expect(() => parseConfig({ sampleRate: "bad" })).not.toThrow();
   });
 });

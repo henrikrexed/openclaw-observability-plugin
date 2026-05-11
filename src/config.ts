@@ -61,9 +61,19 @@ export interface OtelObservabilityConfig {
   metricsIntervalMs: number;
   /**
    * Trace sampling rate from 0.0 (drop all) to 1.0 (keep all).
-   * When undefined, the SDK default (AlwaysOn) is used.
-   * Applied via ParentBasedSampler + TraceIdRatioBasedSampler so child
-   * spans honor the root sampling decision (head-based sampling).
+   *
+   * When undefined, the plugin does NOT register a sampler and the SDK
+   * default (`parentbased_always_on`) takes over. When set, the plugin
+   * wires `ParentBasedSampler(TraceIdRatioBasedSampler(sampleRate))` so
+   * child spans honor the root sampling decision (head-based sampling).
+   *
+   * NOTE: an explicit `sampleRate` here OVERRIDES the standard
+   * `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG` env vars — the
+   * plugin builds the sampler directly and never reads them. Operators
+   * coming from other OTel SDKs should set `sampleRate` in plugin
+   * config rather than rely on env vars. Omit `sampleRate` to let the
+   * SDK default (`parentbased_always_on`) apply; the env vars still
+   * have no effect because the SDK builds its own default sampler.
    */
   sampleRate?: number;
   /** Additional OTel resource attributes */
@@ -154,7 +164,54 @@ export function policyEnablesLlmContent(
   );
 }
 
-export function parseConfig(raw: unknown): OtelObservabilityConfig {
+/**
+ * Minimal logger shape used by `parseConfig` for diagnostic warnings.
+ * Matches the OpenClaw gateway logger surface (and pino-style loggers)
+ * without coupling to a concrete type.
+ */
+export interface ParseConfigLogger {
+  warn: (msg: string) => void;
+}
+
+function parseSampleRate(
+  obj: Record<string, unknown>,
+  logger: ParseConfigLogger | undefined,
+): number | undefined {
+  if (!("sampleRate" in obj)) return undefined;
+
+  const raw = obj.sampleRate;
+  if (
+    typeof raw === "number" &&
+    Number.isFinite(raw) &&
+    raw >= 0 &&
+    raw <= 1
+  ) {
+    return raw;
+  }
+
+  // Anything else falls through to the SDK default. Surface a diagnostic
+  // so silent typos like `"sampleRate": "0.5"` (string) or `1.5`
+  // (out-of-range) don't quietly disable head-based sampling.
+  if (logger) {
+    let display: string;
+    try {
+      display = typeof raw === "string" ? JSON.stringify(raw) : String(raw);
+    } catch {
+      display = "<unserializable>";
+    }
+    logger.warn(
+      `[otel] Ignoring invalid sampleRate=${display} (typeof=${typeof raw}); ` +
+        `expected a finite number in [0, 1]. Falling back to SDK default ` +
+        `(parentbased_always_on).`,
+    );
+  }
+  return undefined;
+}
+
+export function parseConfig(
+  raw: unknown,
+  logger?: ParseConfigLogger,
+): OtelObservabilityConfig {
   const obj =
     raw && typeof raw === "object" && !Array.isArray(raw)
       ? (raw as Record<string, unknown>)
@@ -177,13 +234,7 @@ export function parseConfig(raw: unknown): OtelObservabilityConfig {
       typeof obj.metricsIntervalMs === "number" && obj.metricsIntervalMs >= 1000
         ? obj.metricsIntervalMs
         : DEFAULTS.metricsIntervalMs,
-    sampleRate:
-      typeof obj.sampleRate === "number" &&
-      Number.isFinite(obj.sampleRate) &&
-      obj.sampleRate >= 0 &&
-      obj.sampleRate <= 1
-        ? obj.sampleRate
-        : undefined,
+    sampleRate: parseSampleRate(obj, logger),
     resourceAttributes:
       obj.resourceAttributes &&
       typeof obj.resourceAttributes === "object" &&
