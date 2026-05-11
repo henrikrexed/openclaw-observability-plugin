@@ -67,8 +67,10 @@ import {
   GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
   GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
   GEN_AI_USAGE_CACHE_READ_TOKENS,
+  GEN_AI_USAGE_CACHE_WRITE_TOKENS,
   GEN_AI_USAGE_INPUT_TOKENS,
   GEN_AI_USAGE_OUTPUT_TOKENS,
+  GEN_AI_USAGE_TOTAL_TOKENS,
   OP_CHAT,
   OP_EXECUTE_TOOL,
   OP_INVOKE_AGENT,
@@ -76,6 +78,8 @@ import {
   TOKEN_TYPE_OUTPUT,
   CODE_FUNCTION,
   CODE_NAMESPACE,
+  CODE_FUNCTION_NAME,
+  CODE_FILE_PATH,
   ERROR_TYPE,
   spanNameExecuteTool,
   spanNameChat,
@@ -97,6 +101,27 @@ import {
 } from "./semconv.js";
 
 const CODE_NS = "openclaw.otel.hooks";
+const CODE_FILE = "src/hooks.ts";
+
+/**
+ * Dual-emits legacy (`code.function` / `code.namespace`) and stable
+ * (`code.function.name` / `code.file.path`) attributes for a hook span.
+ * Spread the result into the span `attributes` block.
+ *
+ * `filePath` defaults to this module's `CODE_FILE`; callers from other
+ * modules MUST pass their own path so `code.file.path` does not lie.
+ *
+ * Centralised so the deprecation window can be closed in one place
+ * (schema `1.3.0`) by dropping the legacy keys from this helper.
+ */
+function codeAttrs(funcName: string, filePath: string = CODE_FILE): Record<string, string> {
+  return {
+    [CODE_FUNCTION]: funcName,
+    [CODE_NAMESPACE]: CODE_NS,
+    [CODE_FUNCTION_NAME]: `${CODE_NS}.${funcName}`,
+    [CODE_FILE_PATH]: filePath,
+  };
+}
 
 const store = new TraceContextStore();
 
@@ -249,8 +274,7 @@ export function registerHooks(
             // GenAI conversation correlation
             [GEN_AI_CONVERSATION_ID]: sessionKey,
             // code.*
-            [CODE_FUNCTION]: "message_received",
-            [CODE_NAMESPACE]: CODE_NS,
+            ...codeAttrs("message_received"),
           },
         });
 
@@ -337,8 +361,7 @@ export function registerHooks(
             "openclaw.session.channel": channel,
             "openclaw.session.user_id": userId,
             "openclaw.agent.id": agentId,
-            [CODE_FUNCTION]: "session_start",
-            [CODE_NAMESPACE]: CODE_NS,
+            ...codeAttrs("session_start"),
           },
         });
 
@@ -461,8 +484,7 @@ export function registerHooks(
               // The model is still being resolved. gen_ai.response.model
               // is written at agent_end from diagnostic usage events.
               // code.*
-              [CODE_FUNCTION]: "before_model_resolve",
-              [CODE_NAMESPACE]: CODE_NS,
+              ...codeAttrs("before_model_resolve"),
               // openclaw legacy (preserve for dashboards)
               "openclaw.agent.id": agentId,
               "openclaw.session.key": sessionKey,
@@ -600,15 +622,16 @@ export function registerHooks(
           {
             kind: SpanKind.CLIENT,
             attributes: {
-              // GenAI stable
+              // GenAI stable — dual-emit gen_ai.system (legacy) + gen_ai.provider.name
+              // for the schema 1.2.x deprecation window.
               [GEN_AI_OPERATION_NAME]: OP_CHAT,
               [GEN_AI_SYSTEM]: provider,
+              [GEN_AI_PROVIDER_NAME]: provider,
               [GEN_AI_REQUEST_MODEL]: model,
               [GEN_AI_CONVERSATION_ID]: sessionKey,
               [GEN_AI_AGENT_ID]: agentId,
               // code.*
-              [CODE_FUNCTION]: "llm_input",
-              [CODE_NAMESPACE]: CODE_NS,
+              ...codeAttrs("llm_input"),
               // openclaw legacy
               "openclaw.agent.id": agentId,
               "openclaw.session.key": sessionKey,
@@ -669,19 +692,23 @@ export function registerHooks(
 
         llmSpan.setAttribute(GEN_AI_RESPONSE_MODEL, responseModel);
         if (inputTokens > 0) {
-          llmSpan.setAttribute("gen_ai.usage.input_tokens", inputTokens);
+          llmSpan.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, inputTokens);
         }
         if (outputTokens > 0) {
-          llmSpan.setAttribute("gen_ai.usage.output_tokens", outputTokens);
+          llmSpan.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, outputTokens);
         }
+        // Dual-emit legacy (`cache_*_tokens`) + stable (`cache_*.input_tokens`)
+        // forms during the schema 1.2.x deprecation window.
         if (cacheRead > 0) {
-          llmSpan.setAttribute("gen_ai.usage.cache_read_tokens", cacheRead);
+          llmSpan.setAttribute(GEN_AI_USAGE_CACHE_READ_TOKENS, cacheRead);
+          llmSpan.setAttribute(GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS, cacheRead);
         }
         if (cacheWrite > 0) {
-          llmSpan.setAttribute("gen_ai.usage.cache_write_tokens", cacheWrite);
+          llmSpan.setAttribute(GEN_AI_USAGE_CACHE_WRITE_TOKENS, cacheWrite);
+          llmSpan.setAttribute(GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, cacheWrite);
         }
         if (totalTokens > 0) {
-          llmSpan.setAttribute("gen_ai.usage.total_tokens", totalTokens);
+          llmSpan.setAttribute(GEN_AI_USAGE_TOTAL_TOKENS, totalTokens);
         }
 
         const durationMs =
@@ -753,8 +780,7 @@ export function registerHooks(
               [GEN_AI_REQUEST_MODEL]: model,
               [GEN_AI_CONVERSATION_ID]: sessionKey,
               [GEN_AI_AGENT_ID]: agentId,
-              [CODE_FUNCTION]: "model_call_started",
-              [CODE_NAMESPACE]: CODE_NS,
+              ...codeAttrs("model_call_started"),
             },
           },
           parentContext
@@ -855,7 +881,7 @@ export function registerHooks(
           span.setAttribute(GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, cacheCreationInputTokens);
         }
         if (totalTokens > 0) {
-          span.setAttribute("gen_ai.usage.total_tokens", totalTokens);
+          span.setAttribute(GEN_AI_USAGE_TOTAL_TOKENS, totalTokens);
         }
 
         const durationMs =
@@ -923,8 +949,7 @@ export function registerHooks(
               [GEN_AI_AGENT_ID]: agentId,
               [GEN_AI_REQUEST_MODEL]: model,
               [GEN_AI_PROVIDER_NAME]: provider,
-              [CODE_FUNCTION]: "before_dispatch",
-              [CODE_NAMESPACE]: CODE_NS,
+              ...codeAttrs("before_dispatch"),
               "openclaw.session.key": sessionKey,
               "openclaw.agent.id": agentId,
             },
@@ -1032,8 +1057,7 @@ export function registerHooks(
               [GEN_AI_TOOL_CALL_ID]: toolCallId,
               [GEN_AI_CONVERSATION_ID]: sessionKey,
               [GEN_AI_AGENT_ID]: agentId,
-              [CODE_FUNCTION]: "before_tool_call",
-              [CODE_NAMESPACE]: CODE_NS,
+              ...codeAttrs("before_tool_call"),
               "openclaw.tool.name": toolName,
               "openclaw.tool.call_id": toolCallId,
               "openclaw.session.key": sessionKey,
@@ -1323,8 +1347,7 @@ export function registerHooks(
               [GEN_AI_TOOL_CALL_ID]: toolCallId,
               [GEN_AI_CONVERSATION_ID]: sessionKey,
               [GEN_AI_AGENT_ID]: agentId,
-              [CODE_FUNCTION]: "tool_result_persist",
-              [CODE_NAMESPACE]: CODE_NS,
+              ...codeAttrs("tool_result_persist"),
               "openclaw.tool.name": toolName,
               "openclaw.tool.call_id": toolCallId,
               "openclaw.tool.is_synthetic": isSynthetic,
@@ -1437,8 +1460,7 @@ export function registerHooks(
               // GenAI conversation correlation
               [GEN_AI_CONVERSATION_ID]: sessionKey,
               // code.*
-              [CODE_FUNCTION]: "message_sent",
-              [CODE_NAMESPACE]: CODE_NS,
+              ...codeAttrs("message_sent"),
             },
           },
           parentContext
@@ -1498,8 +1520,7 @@ export function registerHooks(
               [GEN_AI_OPERATION_NAME]: OP_INVOKE_AGENT,
               [GEN_AI_CONVERSATION_ID]: sessionKey,
               [GEN_AI_AGENT_ID]: agentId,
-              [CODE_FUNCTION]: "before_agent_finalize",
-              [CODE_NAMESPACE]: CODE_NS,
+              ...codeAttrs("before_agent_finalize"),
               "openclaw.session.key": sessionKey,
               "openclaw.agent.id": agentId,
             },
@@ -1556,8 +1577,7 @@ export function registerHooks(
               "openclaw.session.key": sessionKey,
               "openclaw.session.reset_reason": resetReason,
               "openclaw.agent.id": agentId,
-              [CODE_FUNCTION]: "before_reset",
-              [CODE_NAMESPACE]: CODE_NS,
+              ...codeAttrs("before_reset"),
             },
           },
           parentContext
@@ -1680,16 +1700,25 @@ export function registerHooks(
           try {
             // Populate token data from agent_end diagnostics if available
             if (totalInputTokens > 0) {
-              sessionCtx.llmSpan.setAttribute("gen_ai.usage.input_tokens", totalInputTokens);
+              sessionCtx.llmSpan.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, totalInputTokens);
             }
             if (totalOutputTokens > 0) {
-              sessionCtx.llmSpan.setAttribute("gen_ai.usage.output_tokens", totalOutputTokens);
+              sessionCtx.llmSpan.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, totalOutputTokens);
             }
+            // Dual-emit legacy + stable cache attribute forms.
             if (cacheReadTokens > 0) {
-              sessionCtx.llmSpan.setAttribute("gen_ai.usage.cache_read_tokens", cacheReadTokens);
+              sessionCtx.llmSpan.setAttribute(GEN_AI_USAGE_CACHE_READ_TOKENS, cacheReadTokens);
+              sessionCtx.llmSpan.setAttribute(
+                GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
+                cacheReadTokens,
+              );
             }
             if (cacheWriteTokens > 0) {
-              sessionCtx.llmSpan.setAttribute("gen_ai.usage.cache_write_tokens", cacheWriteTokens);
+              sessionCtx.llmSpan.setAttribute(GEN_AI_USAGE_CACHE_WRITE_TOKENS, cacheWriteTokens);
+              sessionCtx.llmSpan.setAttribute(
+                GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+                cacheWriteTokens,
+              );
             }
             const llmDurationMs = sessionCtx.llmStartTime
               ? Date.now() - sessionCtx.llmStartTime
@@ -1743,22 +1772,24 @@ export function registerHooks(
           }
 
           // Token usage — GenAI semantic convention attributes
-          agentSpan.setAttribute("gen_ai.usage.input_tokens", totalInputTokens);
-          agentSpan.setAttribute("gen_ai.usage.output_tokens", totalOutputTokens);
-          agentSpan.setAttribute("gen_ai.usage.total_tokens", totalTokens);
-          agentSpan.setAttribute("gen_ai.response.model", model);
+          agentSpan.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, totalInputTokens);
+          agentSpan.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, totalOutputTokens);
+          agentSpan.setAttribute(GEN_AI_USAGE_TOTAL_TOKENS, totalTokens);
+          agentSpan.setAttribute(GEN_AI_RESPONSE_MODEL, model);
           agentSpan.setAttribute("openclaw.agent.success", success);
 
           if (diagUsage?.provider) {
             agentSpan.setAttribute(GEN_AI_PROVIDER_NAME, diagUsage.provider);
           }
 
-          // Cache tokens (custom attributes)
+          // Cache tokens — dual-emit legacy + stable input_tokens forms.
           if (cacheReadTokens > 0) {
-            agentSpan.setAttribute("gen_ai.usage.cache_read_tokens", cacheReadTokens);
+            agentSpan.setAttribute(GEN_AI_USAGE_CACHE_READ_TOKENS, cacheReadTokens);
+            agentSpan.setAttribute(GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS, cacheReadTokens);
           }
           if (cacheWriteTokens > 0) {
-            agentSpan.setAttribute("gen_ai.usage.cache_write_tokens", cacheWriteTokens);
+            agentSpan.setAttribute(GEN_AI_USAGE_CACHE_WRITE_TOKENS, cacheWriteTokens);
+            agentSpan.setAttribute(GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, cacheWriteTokens);
           }
 
           // Cost (from diagnostic events) — this is the key addition!
@@ -1890,8 +1921,7 @@ export function registerHooks(
               [OC_SUBAGENT_CHILD_AGENT_ID]: childAgentId,
               [OC_SUBAGENT_CHILD_AGENT_NAME]: childAgentName,
               [OC_SUBAGENT_SPAWN_REASON]: spawnReason,
-              [CODE_FUNCTION]: "subagent_spawning",
-              [CODE_NAMESPACE]: CODE_NS,
+              ...codeAttrs("subagent_spawning"),
               "openclaw.session.key": parentSessionKey,
               "openclaw.agent.id": parentAgentId,
             },
@@ -1970,8 +2000,7 @@ export function registerHooks(
               [OC_SUBAGENT_CHILD_SESSION]: childSessionKey,
               [OC_SUBAGENT_CHILD_AGENT_ID]: childAgentId,
               [OC_SUBAGENT_DELIVERY_TYPE]: deliveryType,
-              [CODE_FUNCTION]: "subagent_delivery_target",
-              [CODE_NAMESPACE]: CODE_NS,
+              ...codeAttrs("subagent_delivery_target"),
               "openclaw.session.key": parentSessionKey,
             },
           },
@@ -2094,8 +2123,7 @@ export function registerHooks(
               [OC_CRON_ACTION]: action,
               [GEN_AI_AGENT_ID]: agentId,
               [GEN_AI_PROVIDER_NAME]: provider,
-              [CODE_FUNCTION]: "cron_changed",
-              [CODE_NAMESPACE]: CODE_NS,
+              ...codeAttrs("cron_changed"),
               "openclaw.session.key": sessionKey,
               "openclaw.agent.id": agentId,
             },
@@ -2165,8 +2193,7 @@ export function registerHooks(
               [OC_CRON_AGENT_ID]: agentId,
               [GEN_AI_AGENT_ID]: agentId,
               [GEN_AI_PROVIDER_NAME]: provider,
-              [CODE_FUNCTION]: "cron_executed",
-              [CODE_NAMESPACE]: CODE_NS,
+              ...codeAttrs("cron_executed"),
             },
           },
           parentContext

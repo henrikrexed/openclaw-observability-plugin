@@ -356,7 +356,7 @@ openclaw.request (root)
 | Attribute | Description |
 |-----------|-------------|
 | `gen_ai.operation.name` | Operation: `invoke_agent`, `chat`, `execute_tool` |
-| `gen_ai.system` | LLM provider name |
+| `gen_ai.system` | LLM provider name — **deprecated**, dual-emitted alongside `gen_ai.provider.name` during schema 1.2.x; removal target `1.3.0` |
 | `gen_ai.request.model` | Requested model name |
 | `gen_ai.response.model` | Actual model used |
 | `gen_ai.response.id` | LLM response ID |
@@ -381,6 +381,39 @@ openclaw.request (root)
 | `openclaw.prompt.chars` | Prompt character count |
 | `openclaw.session.message_count` | History size fed to LLM |
 | `openclaw.dispatch.duration_ms` | Dispatch phase duration |
+
+### Deprecated attributes — dual-emit window (schema 1.2.x)
+
+Schema `1.2.0` (ISI-994) aligns the plugin with the OTel GenAI / code
+semantic-convention changes published in the 2026-04 registry refresh.
+The legacy keys are **still emitted** alongside the stable replacements
+during a one-minor-release deprecation window so dashboards keyed on
+either form keep working. They will be **removed** in schema `1.3.0`
+(plugin `0.5.0`).
+
+| Legacy attribute | Stable replacement | Where dual-emit lands |
+|------------------|--------------------|-----------------------|
+| `gen_ai.system` | `gen_ai.provider.name` | LLM client span (`llm_input` / `model_call_started`), agent-turn span (via `enrichSpanWithUsage`), and the `model.usage` metric attribute set |
+| `code.function` + `code.namespace` | `code.function.name` (= `${namespace}.${function}`) + `code.file.path` | Every hook-span emit site in `src/hooks.ts` (centralised in the `codeAttrs(funcName)` helper) |
+| `gen_ai.usage.cache_read_tokens` | `gen_ai.usage.cache_read.input_tokens` | `llm_output`, both `agent_end` safety nets, and `enrichSpanWithUsage` |
+| `gen_ai.usage.cache_write_tokens` | `gen_ai.usage.cache_creation.input_tokens` | Same sites as above |
+| `gen_ai.usage.total_tokens` | *(none — compute `input + output`)* | Kept for backward compatibility; marked `@deprecated` in `src/semconv.ts` |
+
+**Consumer migration checklist (before `1.3.0` ships):**
+
+- Update Dynatrace dashboards / DQL queries to read
+  `gen_ai.provider.name` instead of `gen_ai.system`.
+- Update queries that filter by `code.function` / `code.namespace` to
+  read `code.function.name` (combined form) or `code.file.path` when a
+  file-level grouping is needed.
+- Switch cache-token panels to the `gen_ai.usage.cache_read.input_tokens`
+  and `gen_ai.usage.cache_creation.input_tokens` keys.
+- Replace any direct reads of `gen_ai.usage.total_tokens` with
+  `gen_ai.usage.input_tokens + gen_ai.usage.output_tokens` so consumers
+  remain accurate after `1.3.0`.
+
+The resource attribute `openclaw.schema.version` carries `1.2.0` on
+every signal so consumers can gate their queries on the schema window.
 
 ---
 

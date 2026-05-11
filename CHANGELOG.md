@@ -8,6 +8,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Added
 
+- **OTel GenAI / code semconv 2026-04 alignment — dual-emit window (ISI-994).**
+  Schema version bumped to `1.2.0` (resource attribute
+  `openclaw.schema.version`). Spans and metrics that previously emitted
+  deprecated attribute keys now also emit the stable replacements alongside
+  the legacy ones for one minor release:
+  - `gen_ai.system` → dual-emit with `gen_ai.provider.name` (LLM client span
+    from `llm_input`, agent-turn enrichment in
+    `enrichSpanWithUsage`, and the `model.usage` metric attribute set in
+    `diagnostics.ts`). `model_call_started` already dual-emitted.
+  - `code.function` + `code.namespace` → dual-emit with
+    `code.function.name` (fully-qualified `${namespace}.${function}`) plus
+    `code.file.path` at every hook-span emit site. Centralised in the new
+    `codeAttrs(funcName)` helper in `src/hooks.ts`. Per-site source line
+    numbers are intentionally not emitted (they would rot on every edit);
+    consumers needing precise emit locations should rely on the function
+    name + file path pair.
+  - `gen_ai.usage.cache_read_tokens` / `gen_ai.usage.cache_write_tokens`
+    → dual-emit with the stable `gen_ai.usage.cache_read.input_tokens` /
+    `gen_ai.usage.cache_creation.input_tokens`. Migrated call sites:
+    `llm_output`, both `agent_end` safety nets in `src/hooks.ts`, and
+    `enrichSpanWithUsage` in `src/diagnostics.ts`.
+  - `gen_ai.usage.total_tokens` is **kept** but marked `@deprecated` in
+    `src/semconv.ts` — consumers should compute `input + output` going
+    forward.
+
+  **Planned removal:** schema `1.3.0` / plugin `0.5.0`. The deprecation
+  window is one minor release; the follow-up removal task is filed as
+  ISI-1004 (a child of the ISI-992 epic).
+  See [`docs/architecture.md#deprecated-attributes--dual-emit-window-schema-12x`](./docs/architecture.md#deprecated-attributes--dual-emit-window-schema-12x)
+  for the full migration table and the consumer-side update checklist.
 - **Granular content capture policy (ISI-1000).** The `captureContent`
   plugin option now accepts a `ContentCapturePolicy` object with five
   per-category flags (`inputMessages`, `outputMessages`, `toolInputs`,
