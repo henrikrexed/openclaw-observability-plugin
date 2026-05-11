@@ -1,14 +1,14 @@
 /**
- * Tests for `redactSensitiveText` (ISI-999).
+ * Tests for `redactSensitiveText` and `setRedactedAttribute` (ISI-999).
  *
  * The redactor scrubs common credential and PII patterns from strings
  * before they are written into span attributes, log records, or event
  * payloads.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { redactSensitiveText } from "../src/security.js";
+import { redactSensitiveText, setRedactedAttribute } from "../src/security.js";
 
 describe("redactSensitiveText", () => {
   it("returns empty/non-string inputs unchanged", () => {
@@ -94,5 +94,115 @@ describe("redactSensitiveText", () => {
     expect(out).toContain("[REDACTED_EMAIL]");
     // Round-trip through JSON.parse to confirm structure is intact.
     expect(() => JSON.parse(out)).not.toThrow();
+  });
+
+  // ─── Case-insensitivity for auth schemes (ISI-999 C1) ────────────────
+
+  it("redacts uppercase BEARER tokens", () => {
+    expect(
+      redactSensitiveText("Authorization: BEARER abcdef1234567890ABCDEF"),
+    ).toBe("Authorization: Bearer [REDACTED_TOKEN]");
+  });
+
+  it("redacts uppercase BASIC credentials", () => {
+    expect(
+      redactSensitiveText("Authorization: BASIC dXNlcjpzdXBlcl9zZWNyZXQ="),
+    ).toBe("Authorization: Basic [REDACTED_CREDENTIALS]");
+  });
+
+  it("redacts mixed-case bearer / basic", () => {
+    expect(
+      redactSensitiveText("authorization: bEaReR abcdef1234567890ABCDEF"),
+    ).toBe("authorization: Bearer [REDACTED_TOKEN]");
+    expect(
+      redactSensitiveText("authorization: bAsIc dXNlcjpzdXBlcl9zZWNyZXQ="),
+    ).toBe("authorization: Basic [REDACTED_CREDENTIALS]");
+  });
+
+  it("redacts uppercase GitHub token prefixes", () => {
+    expect(
+      redactSensitiveText("GHP_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"),
+    ).toBe("[REDACTED_GITHUB_TOKEN]");
+  });
+
+  // ─── Email false-positive avoidance (ISI-999 M1) ─────────────────────
+
+  it("does not redact npm-style version specifiers as emails", () => {
+    expect(redactSensitiveText("install package-lock@5.0.0.tgz")).toBe(
+      "install package-lock@5.0.0.tgz",
+    );
+    expect(redactSensitiveText("install webpack@1.2.3.tgz")).toBe(
+      "install webpack@1.2.3.tgz",
+    );
+    expect(redactSensitiveText("pnpm add @scope/pkg@4.5.6.tgz")).toBe(
+      "pnpm add @scope/pkg@4.5.6.tgz",
+    );
+  });
+
+  it("still redacts real emails on tricky domains", () => {
+    expect(redactSensitiveText("dev+1@my-host.co.uk")).toBe(
+      "[REDACTED_EMAIL]",
+    );
+    expect(redactSensitiveText("ops@s3.us-east-1.amazonaws.com")).toBe(
+      "[REDACTED_EMAIL]",
+    );
+  });
+
+  // ─── Idempotency (ISI-999) ───────────────────────────────────────────
+
+  it("is idempotent: redact(redact(x)) === redact(x)", () => {
+    const samples = [
+      "Authorization: Bearer abcdef1234567890ABCDEF",
+      "Authorization: BASIC dXNlcjpzdXBlcl9zZWNyZXQ=",
+      "key=sk-abcdefghijklmnopqrstuv email=bob@example.com",
+      "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+      "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE",
+      "no secrets here",
+      "",
+    ];
+    for (const s of samples) {
+      const once = redactSensitiveText(s);
+      const twice = redactSensitiveText(once);
+      expect(twice).toBe(once);
+    }
+  });
+
+  // ─── Word-boundary negatives ─────────────────────────────────────────
+
+  it("does not redact partial prefixes inside larger words", () => {
+    // sk- prefix inside another word should not match
+    expect(redactSensitiveText("xsk-abcdefghijklmnopqrstuv")).toBe(
+      "xsk-abcdefghijklmnopqrstuv",
+    );
+    // gh prefix inside another word should not match
+    expect(redactSensitiveText("xghp_abcdefghijklmnopqrstuvwxyz012345")).toBe(
+      "xghp_abcdefghijklmnopqrstuvwxyz012345",
+    );
+  });
+});
+
+describe("setRedactedAttribute", () => {
+  it("redacts string values before calling span.setAttribute", () => {
+    const setAttribute = vi.fn();
+    const span = { setAttribute } as any;
+    setRedactedAttribute(
+      span,
+      "openclaw.tool.input_preview",
+      'curl -H "Authorization: Bearer abcdef1234567890ABCDEF"',
+    );
+    expect(setAttribute).toHaveBeenCalledTimes(1);
+    expect(setAttribute).toHaveBeenCalledWith(
+      "openclaw.tool.input_preview",
+      'curl -H "Authorization: Bearer [REDACTED_TOKEN]"',
+    );
+  });
+
+  it("passes non-string values through unchanged", () => {
+    const setAttribute = vi.fn();
+    const span = { setAttribute } as any;
+    setRedactedAttribute(span, "openclaw.tool.result_chars", 42);
+    setRedactedAttribute(span, "openclaw.flag", true);
+    expect(setAttribute).toHaveBeenNthCalledWith(1, "openclaw.tool.result_chars", 42);
+    expect(setAttribute).toHaveBeenNthCalledWith(2, "openclaw.flag", true);
   });
 });
