@@ -34,6 +34,7 @@ import { initTelemetry, hasPreloadedOtelSdk, type TelemetryRuntime } from "./src
 import { initOpenLLMetry } from "./src/openllmetry.js";
 import { registerHooks } from "./src/hooks.js";
 import { registerDiagnosticsListener, hasDiagnosticsSupport } from "./src/diagnostics.js";
+import { initLogPipeline, bridgeGatewayLogger, type LogPipelineRuntime } from "./src/logs.js";
 
 // ── Public re-exports ───────────────────────────────────────────────
 // W3C trace context propagation helpers. Available without the plugin
@@ -65,23 +66,38 @@ const otelObservabilityPlugin = {
     const logger = api.logger;
 
     let telemetry: TelemetryRuntime | null = null;
+    let logPipeline: LogPipelineRuntime | null = null;
+    let restoreLogger: (() => void) | null = null;
     let unsubscribeDiagnostics: (() => void) | null = null;
     let stopHooks: (() => void) | null = null;
 
     // ── Telemetry + hooks (init at register() time) ─────────────────
-    // Both MUST run during register() so they work in every OpenClaw
-    // context, not just the gateway:
+    // Telemetry, the log pipeline, and hooks ALL run during register()
+    // so they work in every OpenClaw context, not just the gateway:
     //   - Hooks: OpenClaw snapshots typed hooks at plugin registration,
     //     so registering later means the gateway never sees them.
-    //   - Telemetry: api.registerService.start() is a no-op in embedded
-    //     runner contexts (openclaw agent CLI, cron, heartbeat,
-    //     task-runner, subagent — see openclaw src/plugins/api-builder.ts).
-    //     Initializing inside start() means telemetry stays null in
-    //     those contexts and every hook is a no-op.
+    //   - Telemetry / log pipeline: api.registerService.start() is a no-op
+    //     in embedded runner contexts (openclaw agent CLI, cron,
+    //     heartbeat, task-runner, subagent — see openclaw
+    //     src/plugins/api-builder.ts). Initializing inside start() means
+    //     telemetry/logs stay null in those contexts and every hook is
+    //     a no-op.
     // registerHooks returns a cleanup fn (clears the stale-session
     // sweeper interval) so service.stop() doesn't leak the timer.
     try {
       telemetry = initTelemetry(config, logger);
+
+      // ISI-997 — wire the OTLP log pipeline + bridge api.logger calls so
+      // every gateway log emitted by this plugin (and anyone holding the
+      // same logger reference) is exported as an OTel LogRecord.
+      if (config.logs) {
+        logPipeline = initLogPipeline(config, logger);
+        if (logPipeline) {
+          restoreLogger = bridgeGatewayLogger(logger, logPipeline.emit);
+          logger.info("[otel] Gateway logger bridged to OTel log pipeline");
+        }
+      }
+
       stopHooks = registerHooks(api, () => telemetry, config);
       logger.info("[otel] Telemetry + hooks initialized at register() (runner-compatible)");
     } catch (err) {
@@ -196,6 +212,16 @@ const otelObservabilityPlugin = {
         if (unsubscribeDiagnostics) {
           unsubscribeDiagnostics();
           unsubscribeDiagnostics = null;
+        }
+        // Unbridge the logger BEFORE shutting the pipeline so no late log
+        // call attempts to push into a draining exporter.
+        if (restoreLogger) {
+          restoreLogger();
+          restoreLogger = null;
+        }
+        if (logPipeline) {
+          await logPipeline.shutdown();
+          logPipeline = null;
         }
         if (telemetry) {
           await telemetry.shutdown();
