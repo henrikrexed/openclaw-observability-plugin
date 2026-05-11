@@ -41,18 +41,80 @@ import {
  * MUST NOT register a second one (the second register() silently replaces
  * the preload's provider, and plugin spans stop reaching the exporter).
  */
-const PRELOADED_OTEL_SDK_ENV = "OPENCLAW_OTEL_PRELOADED";
+export const PRELOADED_OTEL_SDK_ENV = "OPENCLAW_OTEL_PRELOADED";
 
 /**
- * Returns true when an OTel SDK has already been registered by the preload.
- * Checks both the env var (survives subprocess forks via NODE_OPTIONS) and
- * the legacy globalThis flag set by older preload versions.
+ * Reads the preload hint from env + globalThis without verifying the global
+ * TracerProvider. Exported for tests; production callers should use
+ * {@link hasPreloadedOtelSdk}, which also verifies a real provider is
+ * registered.
  */
-export function hasPreloadedOtelSdk(): boolean {
+export function readPreloadHint(): boolean {
   return (
     process.env[PRELOADED_OTEL_SDK_ENV] === "1" ||
     (globalThis as any).__OPENCLAW_OTEL_PRELOAD_ACTIVE === true
   );
+}
+
+/**
+ * Returns true iff the current global TracerProvider is a real (non-Noop)
+ * provider — i.e. some SDK has called `provider.register()` and the proxy
+ * has a non-Noop delegate, or a non-proxy provider was registered directly.
+ *
+ * Used to defend against env-var-lying scenarios: a child process can inherit
+ * `OPENCLAW_OTEL_PRELOADED=1` while `NODE_OPTIONS` is stripped (sandbox
+ * runners, setuid binaries, `child_process.spawn({env})` overriding the
+ * environment), in which case the preload script never ran and no real
+ * provider exists. Without verification, the plugin would skip its own
+ * registration and silently drop every span as a NOOP.
+ */
+function hasRealGlobalTracerProvider(): boolean {
+  try {
+    const provider = trace.getTracerProvider() as unknown as {
+      getDelegate?: () => unknown;
+    };
+    if (provider == null) return false;
+
+    // ProxyTracerProvider exposes getDelegate(); unset → NoopTracerProvider.
+    if (typeof provider.getDelegate === "function") {
+      const delegate = provider.getDelegate();
+      const ctorName =
+        (delegate as { constructor?: { name?: string } } | null)?.constructor
+          ?.name ?? "";
+      if (delegate == null) return false;
+      if (ctorName === "NoopTracerProvider") return false;
+      if (ctorName === "ProxyTracerProvider") return false;
+      return true;
+    }
+
+    // A non-proxy provider was registered directly — treat as real unless
+    // it's a NoopTracerProvider.
+    const ctorName =
+      (provider as { constructor?: { name?: string } }).constructor?.name ?? "";
+    if (ctorName === "NoopTracerProvider") return false;
+    if (ctorName === "ProxyTracerProvider") return false;
+    return true;
+  } catch {
+    // Be conservative: if we can't verify a real provider, fall through so
+    // the plugin registers its own — better to risk a double-register warning
+    // than to drop every span silently.
+    return false;
+  }
+}
+
+/**
+ * Returns true when an OTel SDK has already been registered by the preload.
+ *
+ * Strategy: treat env/globalThis as a hint, then verify with the OTel API
+ * that a real global TracerProvider is actually registered. Falls through
+ * (returns false) when the hint is set but no real provider exists, so the
+ * plugin will register its own provider and spans always have an exporter.
+ *
+ * @see hasRealGlobalTracerProvider for the verification step.
+ */
+export function hasPreloadedOtelSdk(): boolean {
+  if (!readPreloadHint()) return false;
+  return hasRealGlobalTracerProvider();
 }
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -169,6 +231,17 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       // tracer backed by it.
       logger.info("[otel] Reusing preloaded OpenTelemetry SDK (skipping plugin TracerProvider registration)");
     } else {
+      if (readPreloadHint()) {
+        // Hint says preload was active but no real global TracerProvider is
+        // registered — typically a sandbox that whitelisted env vars but
+        // stripped NODE_OPTIONS, so the preload script never executed.
+        // Register our own provider instead of trusting the lying hint, so
+        // spans still reach the exporter.
+        logger.warn(
+          "[otel] Preload hint set but no global TracerProvider registered — registering plugin provider (NODE_OPTIONS likely stripped)",
+        );
+      }
+
       const traceExporter =
         config.protocol === "grpc"
           ? new OTLPTraceExporterGRPC({ url: traceEndpoint, headers: config.headers })
