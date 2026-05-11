@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Removed
+
+- **Legacy OTel semconv 2026-04 attributes — dual-emit window closed (ISI-1004).**
+  Schema version bumped to `1.3.0` (resource attribute
+  `openclaw.schema.version`); plugin version bumped to `0.5.0`. The
+  deprecated keys dual-emitted in `1.2.0` (ISI-994) are no longer
+  emitted on spans or metrics:
+
+  | Removed (1.3.0)                       | Stable replacement (already shipped in 1.2.0)                            |
+  | ------------------------------------- | ------------------------------------------------------------------------ |
+  | `gen_ai.system`                       | `gen_ai.provider.name`                                                   |
+  | `code.function` + `code.namespace`    | `code.function.name` + `code.file.path`                                  |
+  | `gen_ai.usage.cache_read_tokens`      | `gen_ai.usage.cache_read.input_tokens`                                   |
+  | `gen_ai.usage.cache_write_tokens`     | `gen_ai.usage.cache_creation.input_tokens`                               |
+  | `gen_ai.usage.total_tokens`           | none — consumers compute `input + output` (per `1.2.0` deprecation note) |
+
+  Affected emit sites: `llm_input`, `llm_output`, `model_call_started`,
+  `model_call_ended`, both `agent_end` safety nets in `src/hooks.ts`; the
+  `model.usage` metric attribute set and `enrichSpanWithUsage` in
+  `src/diagnostics.ts`. Constants exported from `src/semconv.ts` for the
+  removed keys (`GEN_AI_SYSTEM`, `CODE_FUNCTION`, `CODE_NAMESPACE`,
+  `GEN_AI_USAGE_CACHE_READ_TOKENS`, `GEN_AI_USAGE_CACHE_WRITE_TOKENS`,
+  `GEN_AI_USAGE_TOTAL_TOKENS`) are also deleted. The
+  `tests/hooks.test.ts` "ISI-994 dual-emit" describe block is replaced by
+  an "ISI-1004 legacy removal" block that pins the inverse assertions, so
+  any regression that re-introduces a legacy key fails the suite.
+
+  **Consumer action:** dashboards, alerts, and queries must switch to the
+  stable keys before upgrading to plugin `0.5.0` / schema `1.3.0`. See
+  [ISI-994](./docs/architecture.md#deprecated-attributes--dual-emit-window-schema-12x)
+  for the migration history.
+
 ### Added
 
 - **Resource identity hygiene (ISI-995).** The trace, metric, and log

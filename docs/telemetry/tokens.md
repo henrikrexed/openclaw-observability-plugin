@@ -8,9 +8,15 @@ Understanding the GenAI token usage attributes in OpenClaw observability.
 |-----------|-------------|-------------|
 | `gen_ai.usage.input_tokens` | Tokens in the prompt sent to the model | Standard input rate |
 | `gen_ai.usage.output_tokens` | Tokens in the model's response | Higher rate (typically 3-5x input) |
-| `gen_ai.usage.cache_read_tokens` | Tokens read from prompt cache | **90% cheaper** than input |
-| `gen_ai.usage.cache_write_tokens` | Tokens written to prompt cache | **25% more expensive** than input |
-| `gen_ai.usage.total_tokens` | Sum of all token types | — |
+| `gen_ai.usage.cache_read.input_tokens` | Tokens read from prompt cache | **90% cheaper** than input |
+| `gen_ai.usage.cache_creation.input_tokens` | Tokens written to prompt cache | **25% more expensive** than input |
+
+> Schema `1.3.0` (ISI-1004) removed the legacy
+> `gen_ai.usage.cache_read_tokens` / `gen_ai.usage.cache_write_tokens` /
+> `gen_ai.usage.total_tokens` keys. Total tokens are now computed as
+> `gen_ai.usage.input_tokens + gen_ai.usage.output_tokens`; cache reads /
+> writes use the stable `cache_read.input_tokens` /
+> `cache_creation.input_tokens` keys.
 
 ## How Tokens Are Calculated
 
@@ -132,10 +138,10 @@ Without caching, the same request would cost:
 
 You might notice:
 ```
-cache_read + cache_write + input + output = 998,598
+cache_read + cache_write + input + output ≠ a backend's reported total
 ```
 
-The `total_tokens` is the sum of all types. Some backends may calculate it differently or include additional overhead tokens.
+Adding `cache_read.input_tokens` + `cache_creation.input_tokens` + `input_tokens` + `output_tokens` may not equal a backend's reported total — different backends count overhead tokens differently. As of schema `1.3.0`, OpenClaw no longer emits `gen_ai.usage.total_tokens`; compute it as `gen_ai.usage.input_tokens + gen_ai.usage.output_tokens` on the consumer side.
 
 ## Optimizing Token Usage
 

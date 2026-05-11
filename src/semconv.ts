@@ -15,12 +15,6 @@
  */
 
 // ── GenAI stable attribute keys ─────────────────────────────────────
-/**
- * @deprecated Replaced by {@link GEN_AI_PROVIDER_NAME} in OTel GenAI
- * semantic conventions (2026-04). Dual-emitted alongside the new key in
- * schema `1.2.0`; planned removal target: schema `1.3.0` / plugin `0.5.0`.
- */
-export const GEN_AI_SYSTEM = "gen_ai.system";
 export const GEN_AI_OPERATION_NAME = "gen_ai.operation.name";
 export const GEN_AI_PROVIDER_NAME = "gen_ai.provider.name";
 export const GEN_AI_REQUEST_MODEL = "gen_ai.request.model";
@@ -37,30 +31,10 @@ export const GEN_AI_TOOL_CALL_ID = "gen_ai.tool.call.id";
 export const GEN_AI_TOOL_TYPE = "gen_ai.tool.type";
 export const GEN_AI_USAGE_INPUT_TOKENS = "gen_ai.usage.input_tokens";
 export const GEN_AI_USAGE_OUTPUT_TOKENS = "gen_ai.usage.output_tokens";
-/**
- * @deprecated Consumers should compute `input + output` instead of relying
- * on a separately emitted total. Kept for backward compatibility during
- * schema `1.2.x`; planned removal target: schema `1.3.0` / plugin `0.5.0`.
- */
-export const GEN_AI_USAGE_TOTAL_TOKENS = "gen_ai.usage.total_tokens";
 /** Stable cache attributes (OTel GenAI semconv 2026-04). */
 export const GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS = "gen_ai.usage.cache_read.input_tokens";
 export const GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS =
   "gen_ai.usage.cache_creation.input_tokens";
-/**
- * @deprecated Replaced by {@link GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS} in
- * OTel GenAI semantic conventions (2026-04). Dual-emitted alongside the
- * stable key in schema `1.2.0`; planned removal target: schema `1.3.0` /
- * plugin `0.5.0`.
- */
-export const GEN_AI_USAGE_CACHE_READ_TOKENS = "gen_ai.usage.cache_read_tokens";
-/**
- * @deprecated Replaced by {@link GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS}
- * in OTel GenAI semantic conventions (2026-04). Dual-emitted alongside the
- * stable key in schema `1.2.0`; planned removal target: schema `1.3.0` /
- * plugin `0.5.0`.
- */
-export const GEN_AI_USAGE_CACHE_WRITE_TOKENS = "gen_ai.usage.cache_write_tokens";
 /** Used on `gen_ai.client.token.usage` histogram to distinguish input / output. */
 export const GEN_AI_TOKEN_TYPE = "gen_ai.token.type";
 
@@ -84,20 +58,6 @@ export const spanNameExecuteTool = (toolName: string): string =>
 export const ERROR_TYPE = "error.type";
 
 // ── Code conventions ────────────────────────────────────────────────
-/**
- * @deprecated Replaced by {@link CODE_FUNCTION_NAME} (fully-qualified
- * `namespace.function`) in OTel general semantic conventions (2026-04).
- * Dual-emitted alongside the new key in schema `1.2.0`; planned removal
- * target: schema `1.3.0` / plugin `0.5.0`.
- */
-export const CODE_FUNCTION = "code.function";
-/**
- * @deprecated Folded into {@link CODE_FUNCTION_NAME} as the prefix segment
- * in OTel general semantic conventions (2026-04). Dual-emitted alongside
- * the new key in schema `1.2.0`; planned removal target: schema `1.3.0` /
- * plugin `0.5.0`.
- */
-export const CODE_NAMESPACE = "code.namespace";
 /** Stable: fully-qualified function identifier, e.g. `namespace.function`. */
 export const CODE_FUNCTION_NAME = "code.function.name";
 /** Stable: repo-relative source file path of the emit site. */
@@ -176,18 +136,20 @@ export const OC_CRON_AGENT_ID = "openclaw.cron.agent_id";
  * Schema version for plugin-domain attributes. Bump when emitted
  * attribute keys or values change in a way that consumers need to know.
  *
- * `1.2.0` — Dual-emit window for the OTel GenAI / code semconv 2026-04
- * migration: spans that previously emitted `gen_ai.system`,
- * `code.function` / `code.namespace`, or `gen_ai.usage.cache_*_tokens`
- * now also emit the stable replacements (`gen_ai.provider.name`,
- * `code.function.name` + `code.file.path`,
- * `gen_ai.usage.cache_read.input_tokens` /
- * `gen_ai.usage.cache_creation.input_tokens`). The legacy keys (and
- * `gen_ai.usage.total_tokens`) are kept for backward compatibility for
- * one minor release. Planned removal target: schema `1.3.0` / plugin
- * `0.5.0`.
+ * `1.3.0` — Closes the OTel GenAI / code semconv 2026-04 dual-emit
+ * window opened in `1.2.0`. The following legacy keys are no longer
+ * emitted (consumers must use the stable replacements shipped in
+ * `1.2.0`):
+ *
+ * | Removed (1.3.0)                       | Stable replacement                                                       |
+ * | ------------------------------------- | ------------------------------------------------------------------------ |
+ * | `gen_ai.system`                       | `gen_ai.provider.name`                                                   |
+ * | `code.function` + `code.namespace`    | `code.function.name` + `code.file.path`                                  |
+ * | `gen_ai.usage.cache_read_tokens`      | `gen_ai.usage.cache_read.input_tokens`                                   |
+ * | `gen_ai.usage.cache_write_tokens`     | `gen_ai.usage.cache_creation.input_tokens`                               |
+ * | `gen_ai.usage.total_tokens`           | none — consumers compute `input + output` (per `1.2.0` deprecation note) |
  */
-export const OPENCLAW_SCHEMA_VERSION = "1.2.0";
+export const OPENCLAW_SCHEMA_VERSION = "1.3.0";
 
 // ── Token type values ───────────────────────────────────────────────
 export const TOKEN_TYPE_INPUT = "input";

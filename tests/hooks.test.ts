@@ -266,7 +266,9 @@ describe("plugin hook registration (ISI-730 migration)", () => {
     expect(turnSpan!.attrs["openclaw.session.key"]).toBe("session-123");
     expect(turnSpan!.attrs["gen_ai.agent.id"]).toBe("claude-4");
     expect(turnSpan!.attrs["gen_ai.conversation.id"]).toBe("session-123");
-    expect(turnSpan!.attrs["code.function"]).toBe("before_model_resolve");
+    expect(turnSpan!.attrs["code.function.name"]).toBe("openclaw.otel.hooks.before_model_resolve");
+    expect(turnSpan!.attrs["code.function"]).toBeUndefined();
+    expect(turnSpan!.attrs["code.namespace"]).toBeUndefined();
     // Model is NOT known at this point — must NOT be set.
     expect(turnSpan!.attrs["gen_ai.request.model"]).toBeUndefined();
     expect(turnSpan!.attrs["openclaw.agent.model"]).toBeUndefined();
@@ -613,13 +615,14 @@ describe("model_call_started / model_call_ended hooks (ISI-926)", () => {
     const chatSpan = spans.find((s) => s.spanName === "chat gpt-4o");
     expect(chatSpan).toBeDefined();
     expect(chatSpan!.attrs["gen_ai.operation.name"]).toBe("chat");
-    expect(chatSpan!.attrs["gen_ai.system"]).toBe("openai");
     expect(chatSpan!.attrs["gen_ai.provider.name"]).toBe("openai");
+    expect(chatSpan!.attrs["gen_ai.system"]).toBeUndefined();
     expect(chatSpan!.attrs["gen_ai.request.model"]).toBe("gpt-4o");
     expect(chatSpan!.attrs["gen_ai.request.stream"]).toBe(true);
     expect(chatSpan!.attrs["gen_ai.request.max_tokens"]).toBe(4096);
     expect(chatSpan!.attrs["gen_ai.conversation.id"]).toBe("s1");
-    expect(chatSpan!.attrs["code.function"]).toBe("model_call_started");
+    expect(chatSpan!.attrs["code.function.name"]).toBe("openclaw.otel.hooks.model_call_started");
+    expect(chatSpan!.attrs["code.function"]).toBeUndefined();
     expect(chatSpan!.ended).toBe(false);
 
     stopHooks();
@@ -670,7 +673,7 @@ describe("model_call_started / model_call_ended hooks (ISI-926)", () => {
     expect(chatSpan!.attrs["gen_ai.usage.output_tokens"]).toBe(80);
     expect(chatSpan!.attrs["gen_ai.usage.cache_read.input_tokens"]).toBe(100);
     expect(chatSpan!.attrs["gen_ai.usage.cache_creation.input_tokens"]).toBe(20);
-    expect(chatSpan!.attrs["gen_ai.usage.total_tokens"]).toBe(290);
+    expect(chatSpan!.attrs["gen_ai.usage.total_tokens"]).toBeUndefined();
     expect(chatSpan!.ended).toBe(true);
 
     stopHooks();
@@ -924,7 +927,8 @@ describe("before_tool_call / after_tool_call hooks (ISI-927)", () => {
     expect(toolSpan!.attrs["gen_ai.operation.name"]).toBe("execute_tool");
     expect(toolSpan!.attrs["gen_ai.conversation.id"]).toBe("s1");
     expect(toolSpan!.attrs["gen_ai.agent.id"]).toBe("a1");
-    expect(toolSpan!.attrs["code.function"]).toBe("before_tool_call");
+    expect(toolSpan!.attrs["code.function.name"]).toBe("openclaw.otel.hooks.before_tool_call");
+    expect(toolSpan!.attrs["code.function"]).toBeUndefined();
     expect(toolSpan!.attrs["openclaw.tool.input_preview"]).toBe('{"path":"/etc/hosts"}');
     expect(toolSpan!.ended).toBe(false);
 
@@ -1136,7 +1140,8 @@ describe("before_tool_call / after_tool_call hooks (ISI-927)", () => {
     const toolSpan = spans.find((s) => s.spanName === "execute_tool Grep");
     expect(toolSpan).toBeDefined();
     expect(toolSpan!.attrs["gen_ai.tool.name"]).toBe("Grep");
-    expect(toolSpan!.attrs["code.function"]).toBe("tool_result_persist");
+    expect(toolSpan!.attrs["code.function.name"]).toBe("openclaw.otel.hooks.tool_result_persist");
+    expect(toolSpan!.attrs["code.function"]).toBeUndefined();
     expect(toolSpan!.ended).toBe(true);
 
     stopHooks();
@@ -1232,11 +1237,12 @@ describe("session_start / session_end hooks (ISI-928)", () => {
     expect(sessionSpan!.attrs["openclaw.session.key"]).toBe("sess-1");
     expect(sessionSpan!.attrs["openclaw.session.channel"]).toBe("cli");
     expect(sessionSpan!.attrs["openclaw.session.user_id"]).toBe("user-42");
+    expect(sessionSpan!.attrs["code.function.name"]).toBe("openclaw.otel.hooks.session_start");
+    expect(sessionSpan!.attrs["code.function"]).toBeUndefined();
     // ISI-995: stable `user.id` mirrors the openclaw-namespaced user id so
     // registry-keyed dashboards can correlate sessions without coupling
     // to the openclaw.* namespace.
     expect(sessionSpan!.attrs["user.id"]).toBe("user-42");
-    expect(sessionSpan!.attrs["code.function"]).toBe("session_start");
     expect(sessionSpan!.ended).toBe(false);
 
     expect(telemetry.gauges.activeSessions.add).toHaveBeenCalledWith(1, expect.any(Object));
@@ -1457,7 +1463,8 @@ describe("before_dispatch / reply_dispatch hooks (ISI-928)", () => {
     expect(dispatchSpan!.attrs["gen_ai.conversation.id"]).toBe("s1");
     expect(dispatchSpan!.attrs["gen_ai.request.model"]).toBe("gpt-4o");
     expect(dispatchSpan!.attrs["gen_ai.provider.name"]).toBe("openai");
-    expect(dispatchSpan!.attrs["code.function"]).toBe("before_dispatch");
+    expect(dispatchSpan!.attrs["code.function.name"]).toBe("openclaw.otel.hooks.before_dispatch");
+    expect(dispatchSpan!.attrs["code.function"]).toBeUndefined();
     expect(dispatchSpan!.ended).toBe(false);
 
     stopHooks();
@@ -1609,7 +1616,8 @@ describe("before_agent_finalize / before_reset hooks (ISI-928)", () => {
     expect(finalizeSpan!.attrs["gen_ai.conversation.id"]).toBe("s1");
     expect(finalizeSpan!.attrs["gen_ai.agent.id"]).toBe("a1");
     expect(finalizeSpan!.attrs["openclaw.agent.pending_messages"]).toBe(2);
-    expect(finalizeSpan!.attrs["code.function"]).toBe("before_agent_finalize");
+    expect(finalizeSpan!.attrs["code.function.name"]).toBe("openclaw.otel.hooks.before_agent_finalize");
+    expect(finalizeSpan!.attrs["code.function"]).toBeUndefined();
     expect(finalizeSpan!.ended).toBe(true);
 
     stopHooks();
@@ -1647,7 +1655,8 @@ describe("before_agent_finalize / before_reset hooks (ISI-928)", () => {
     expect(resetSpan!.attrs["gen_ai.conversation.id"]).toBe("s1");
     expect(resetSpan!.attrs["openclaw.session.key"]).toBe("s1");
     expect(resetSpan!.attrs["openclaw.session.reset_reason"]).toBe("user_requested");
-    expect(resetSpan!.attrs["code.function"]).toBe("before_reset");
+    expect(resetSpan!.attrs["code.function.name"]).toBe("openclaw.otel.hooks.before_reset");
+    expect(resetSpan!.attrs["code.function"]).toBeUndefined();
     expect(resetSpan!.ended).toBe(true);
 
     expect(telemetry.counters.sessionResets.add).toHaveBeenCalledWith(
@@ -1761,7 +1770,8 @@ describe("subagent_spawning / subagent_delivery_target / subagent_ended hooks (I
     expect(spawnSpan!.attrs["openclaw.subagent.child_agent_name"]).toBe("child-agent");
     expect(spawnSpan!.attrs["openclaw.subagent.spawn_reason"]).toBe("task_delegation");
     expect(spawnSpan!.attrs["gen_ai.operation.name"]).toBe("invoke_agent");
-    expect(spawnSpan!.attrs["code.function"]).toBe("subagent_spawning");
+    expect(spawnSpan!.attrs["code.function.name"]).toBe("openclaw.otel.hooks.subagent_spawning");
+    expect(spawnSpan!.attrs["code.function"]).toBeUndefined();
     expect(spawnSpan!.ended).toBe(false);
 
     expect(telemetry.counters.subagentSpawns.add).toHaveBeenCalledWith(
@@ -1798,7 +1808,8 @@ describe("subagent_spawning / subagent_delivery_target / subagent_ended hooks (I
     expect(deliverySpan!.attrs["openclaw.subagent.parent_session_key"]).toBe("parent-sess");
     expect(deliverySpan!.attrs["openclaw.subagent.child_session_key"]).toBe("child-sess");
     expect(deliverySpan!.attrs["openclaw.subagent.delivery_type"]).toBe("task_prompt");
-    expect(deliverySpan!.attrs["code.function"]).toBe("subagent_delivery_target");
+    expect(deliverySpan!.attrs["code.function.name"]).toBe("openclaw.otel.hooks.subagent_delivery_target");
+    expect(deliverySpan!.attrs["code.function"]).toBeUndefined();
     expect(deliverySpan!.ended).toBe(true);
 
     stopHooks();
@@ -1986,7 +1997,8 @@ describe("cron_changed / cron_executed hooks (ISI-929)", () => {
     expect(cronSpan!.attrs["openclaw.cron.expression"]).toBe("*/5 * * * *");
     expect(cronSpan!.attrs["gen_ai.agent.id"]).toBe("agent-1");
     expect(cronSpan!.attrs["gen_ai.provider.name"]).toBe("openai");
-    expect(cronSpan!.attrs["code.function"]).toBe("cron_changed");
+    expect(cronSpan!.attrs["code.function.name"]).toBe("openclaw.otel.hooks.cron_changed");
+    expect(cronSpan!.attrs["code.function"]).toBeUndefined();
     expect(cronSpan!.ended).toBe(true);
 
     expect(telemetry.counters.cronChanges.add).toHaveBeenCalledWith(
@@ -2041,7 +2053,8 @@ describe("cron_changed / cron_executed hooks (ISI-929)", () => {
     expect(cronSpan!.attrs["openclaw.cron.agent_id"]).toBe("agent-2");
     expect(cronSpan!.attrs["gen_ai.agent.id"]).toBe("agent-2");
     expect(cronSpan!.attrs["gen_ai.provider.name"]).toBe("anthropic");
-    expect(cronSpan!.attrs["code.function"]).toBe("cron_executed");
+    expect(cronSpan!.attrs["code.function.name"]).toBe("openclaw.otel.hooks.cron_executed");
+    expect(cronSpan!.attrs["code.function"]).toBeUndefined();
     // ISI-993: `cron_executed` is not a valid OTel gen_ai.operation.name value.
     expect(cronSpan!.attrs["gen_ai.operation.name"]).toBeUndefined();
     expect(cronSpan!.ended).toBe(true);
@@ -2515,21 +2528,18 @@ describe("content capture policy gating (ISI-1000)", () => {
   });
 });
 
-// ── ISI-994: OTel semconv 2026-04 dual-emit window ──────────────────
+// ── ISI-1004: closure of the ISI-994 dual-emit window ───────────────
 //
-// Schema 1.2.0 dual-emits four groups of legacy attributes alongside
-// their stable replacements during a one-minor-release deprecation
-// window. The legacy keys MUST continue to be emitted exactly where they
-// used to be — these tests pin down both halves of the dual-emit so a
-// premature removal in 1.3.0 cannot quietly land without flipping the
-// expectations explicitly.
+// Schema 1.2.0 dual-emitted four groups of legacy attributes alongside
+// their stable replacements. Schema 1.3.0 closes that window: the legacy
+// keys MUST NOT be emitted any more. These tests pin the *removal* — the
+// inverse of the dual-emit tests they replaced — so a regression that
+// re-introduces a legacy key fails loudly.
 
-describe("ISI-994: GenAI / code semconv dual-emit (schema 1.2.x)", () => {
+describe("ISI-1004: legacy semconv keys removed (schema 1.3.0)", () => {
   let stopHooks: (() => void) | undefined;
 
   afterEach(() => {
-    // Defensive cleanup: a thrown expect leaves stopHooks unrun, which
-    // leaks hook registrations into the next test. Always release here.
     try {
       stopHooks?.();
     } catch {
@@ -2538,7 +2548,7 @@ describe("ISI-994: GenAI / code semconv dual-emit (schema 1.2.x)", () => {
     stopHooks = undefined;
   });
 
-  it("llm_input dual-emits gen_ai.system + gen_ai.provider.name AND code.* legacy + stable", () => {
+  it("llm_input emits only stable gen_ai.provider.name + code.function.name (no legacy)", () => {
     const { api, typedHooks } = createStubApi();
     const { telemetry, spans } = createTelemetry();
     stopHooks = registerHooks(api, () => telemetry, config);
@@ -2546,27 +2556,27 @@ describe("ISI-994: GenAI / code semconv dual-emit (schema 1.2.x)", () => {
     const resolve = typedHooks.get("before_model_resolve")!;
     const llmInput = typedHooks.get("llm_input")!;
 
-    resolve({}, { agentId: "a1", sessionKey: "s-994a" });
+    resolve({}, { agentId: "a1", sessionKey: "s-1004a" });
     llmInput(
-      { sessionKey: "s-994a", agentId: "a1", model: "gpt-4o", provider: "openai" },
-      { sessionKey: "s-994a" },
+      { sessionKey: "s-1004a", agentId: "a1", model: "gpt-4o", provider: "openai" },
+      { sessionKey: "s-1004a" },
     );
 
     const llmCall = spans.find((s) => s.spanName === "openclaw.llm.call");
     expect(llmCall).toBeDefined();
 
-    // gen_ai provider dual-emit
-    expect(llmCall!.attrs["gen_ai.system"]).toBe("openai");
+    // Stable keys present
     expect(llmCall!.attrs["gen_ai.provider.name"]).toBe("openai");
-
-    // code.* dual-emit: legacy + stable forms must both land
-    expect(llmCall!.attrs["code.function"]).toBe("llm_input");
-    expect(llmCall!.attrs["code.namespace"]).toBe("openclaw.otel.hooks");
     expect(llmCall!.attrs["code.function.name"]).toBe("openclaw.otel.hooks.llm_input");
     expect(llmCall!.attrs["code.file.path"]).toBe("src/hooks.ts");
+
+    // Legacy keys must not be emitted any more
+    expect(llmCall!.attrs["gen_ai.system"]).toBeUndefined();
+    expect(llmCall!.attrs["code.function"]).toBeUndefined();
+    expect(llmCall!.attrs["code.namespace"]).toBeUndefined();
   });
 
-  it("llm_output dual-emits cache_*_tokens (legacy) + cache_*.input_tokens (stable)", () => {
+  it("llm_output emits only stable cache_*.input_tokens (no legacy cache_*_tokens, no total_tokens)", () => {
     const { api, typedHooks } = createStubApi();
     const { telemetry, spans } = createTelemetry();
     stopHooks = registerHooks(api, () => telemetry, config);
@@ -2575,14 +2585,14 @@ describe("ISI-994: GenAI / code semconv dual-emit (schema 1.2.x)", () => {
     const llmInput = typedHooks.get("llm_input")!;
     const llmOutput = typedHooks.get("llm_output")!;
 
-    resolve({}, { agentId: "a1", sessionKey: "s-994b" });
+    resolve({}, { agentId: "a1", sessionKey: "s-1004b" });
     llmInput(
-      { sessionKey: "s-994b", agentId: "a1", model: "gpt-4o", provider: "openai" },
-      { sessionKey: "s-994b" },
+      { sessionKey: "s-1004b", agentId: "a1", model: "gpt-4o", provider: "openai" },
+      { sessionKey: "s-1004b" },
     );
     llmOutput(
       {
-        sessionKey: "s-994b",
+        sessionKey: "s-1004b",
         responseModel: "gpt-4o-2024-08-06",
         usage: {
           input: 100,
@@ -2591,21 +2601,23 @@ describe("ISI-994: GenAI / code semconv dual-emit (schema 1.2.x)", () => {
           cacheWrite: 40,
         },
       },
-      { sessionKey: "s-994b" },
+      { sessionKey: "s-1004b" },
     );
 
     const llmCall = spans.find((s) => s.spanName === "openclaw.llm.call");
     expect(llmCall).toBeDefined();
 
-    // Legacy keys still emitted
-    expect(llmCall!.attrs["gen_ai.usage.cache_read_tokens"]).toBe(800);
-    expect(llmCall!.attrs["gen_ai.usage.cache_write_tokens"]).toBe(40);
-    // Stable replacements also emitted
+    // Stable replacements present
     expect(llmCall!.attrs["gen_ai.usage.cache_read.input_tokens"]).toBe(800);
     expect(llmCall!.attrs["gen_ai.usage.cache_creation.input_tokens"]).toBe(40);
+
+    // Legacy keys removed
+    expect(llmCall!.attrs["gen_ai.usage.cache_read_tokens"]).toBeUndefined();
+    expect(llmCall!.attrs["gen_ai.usage.cache_write_tokens"]).toBeUndefined();
+    expect(llmCall!.attrs["gen_ai.usage.total_tokens"]).toBeUndefined();
   });
 
-  it("non-LLM hook spans (session_start) also dual-emit code.* keys", () => {
+  it("non-LLM hook spans (session_start) emit only stable code.function.name (no legacy)", () => {
     const { api, typedHooks } = createStubApi();
     const { telemetry, spans } = createTelemetry();
     stopHooks = registerHooks(api, () => telemetry, config);
@@ -2613,25 +2625,25 @@ describe("ISI-994: GenAI / code semconv dual-emit (schema 1.2.x)", () => {
     const sessionStart = typedHooks.get("session_start")!;
     sessionStart(
       {
-        sessionKey: "s-994c",
+        sessionKey: "s-1004c",
         agentId: "a1",
         channel: "cli",
         userId: "u1",
       },
-      { sessionKey: "s-994c" },
+      { sessionKey: "s-1004c" },
     );
 
     const sessionSpan = spans.find((s) => s.spanName === "openclaw.session");
     expect(sessionSpan).toBeDefined();
-    expect(sessionSpan!.attrs["code.function"]).toBe("session_start");
-    expect(sessionSpan!.attrs["code.namespace"]).toBe("openclaw.otel.hooks");
     expect(sessionSpan!.attrs["code.function.name"]).toBe(
       "openclaw.otel.hooks.session_start",
     );
     expect(sessionSpan!.attrs["code.file.path"]).toBe("src/hooks.ts");
+    expect(sessionSpan!.attrs["code.function"]).toBeUndefined();
+    expect(sessionSpan!.attrs["code.namespace"]).toBeUndefined();
   });
 
-  it("dispatch.prepare span dual-emits code.* legacy + stable forms (incl. code.namespace)", () => {
+  it("dispatch.prepare span emits only stable code.function.name (no legacy code.function / code.namespace)", () => {
     const { api, typedHooks } = createStubApi();
     const { telemetry, spans } = createTelemetry();
     stopHooks = registerHooks(api, () => telemetry, config);
@@ -2639,23 +2651,23 @@ describe("ISI-994: GenAI / code semconv dual-emit (schema 1.2.x)", () => {
     const resolve = typedHooks.get("before_model_resolve")!;
     const beforeDispatch = typedHooks.get("before_dispatch")!;
 
-    resolve({}, { agentId: "a1", sessionKey: "s-994d" });
+    resolve({}, { agentId: "a1", sessionKey: "s-1004d" });
     beforeDispatch(
-      { sessionKey: "s-994d", agentId: "a1", model: "gpt-4o", provider: "openai" },
-      { sessionKey: "s-994d" },
+      { sessionKey: "s-1004d", agentId: "a1", model: "gpt-4o", provider: "openai" },
+      { sessionKey: "s-1004d" },
     );
 
     const dispatchSpan = spans.find((s) => s.spanName === "openclaw.dispatch.prepare");
     expect(dispatchSpan).toBeDefined();
-    expect(dispatchSpan!.attrs["code.function"]).toBe("before_dispatch");
-    expect(dispatchSpan!.attrs["code.namespace"]).toBe("openclaw.otel.hooks");
     expect(dispatchSpan!.attrs["code.function.name"]).toBe(
       "openclaw.otel.hooks.before_dispatch",
     );
     expect(dispatchSpan!.attrs["code.file.path"]).toBe("src/hooks.ts");
+    expect(dispatchSpan!.attrs["code.function"]).toBeUndefined();
+    expect(dispatchSpan!.attrs["code.namespace"]).toBeUndefined();
   });
 
-  it("model_call_started span dual-emits gen_ai.system + gen_ai.provider.name", () => {
+  it("model_call_started span emits only stable gen_ai.provider.name (no legacy gen_ai.system)", () => {
     const { api, typedHooks } = createStubApi();
     const { telemetry, spans } = createTelemetry();
     stopHooks = registerHooks(api, () => telemetry, config);
@@ -2663,21 +2675,19 @@ describe("ISI-994: GenAI / code semconv dual-emit (schema 1.2.x)", () => {
     const resolve = typedHooks.get("before_model_resolve")!;
     const modelCallStarted = typedHooks.get("model_call_started")!;
 
-    resolve({}, { agentId: "a1", sessionKey: "s-994e" });
+    resolve({}, { agentId: "a1", sessionKey: "s-1004e" });
     modelCallStarted(
-      { sessionKey: "s-994e", agentId: "a1", model: "gpt-4o", provider: "openai" },
-      { sessionKey: "s-994e" },
+      { sessionKey: "s-1004e", agentId: "a1", model: "gpt-4o", provider: "openai" },
+      { sessionKey: "s-1004e" },
     );
 
     const chatSpan = spans.find((s) => s.spanName === "chat gpt-4o");
     expect(chatSpan).toBeDefined();
-    // Both halves of the dual-emit must land — without this assertion,
-    // either could silently regress without flipping the legacy key.
-    expect(chatSpan!.attrs["gen_ai.system"]).toBe("openai");
     expect(chatSpan!.attrs["gen_ai.provider.name"]).toBe("openai");
+    expect(chatSpan!.attrs["gen_ai.system"]).toBeUndefined();
   });
 
-  it("agent_end safety-net dual-emits cache + provider attrs on the leftover LLM span", async () => {
+  it("agent_end safety-net emits only stable cache_*.input_tokens (no legacy cache_*_tokens)", async () => {
     const { api, typedHooks } = createStubApi();
     const { telemetry, spans } = createTelemetry();
     stopHooks = registerHooks(api, () => telemetry, config);
@@ -2686,21 +2696,19 @@ describe("ISI-994: GenAI / code semconv dual-emit (schema 1.2.x)", () => {
     const llmInput = typedHooks.get("llm_input")!;
     const agentEnd = typedHooks.get("agent_end")!;
 
-    resolve({}, { agentId: "a1", sessionKey: "s-994f" });
+    resolve({}, { agentId: "a1", sessionKey: "s-1004f" });
     // Open an LLM span via llm_input; do NOT close it via llm_output so the
     // agent_end safety net is exercised.
     llmInput(
-      { sessionKey: "s-994f", agentId: "a1", model: "claude-3.5", provider: "anthropic" },
-      { sessionKey: "s-994f" },
+      { sessionKey: "s-1004f", agentId: "a1", model: "claude-3.5", provider: "anthropic" },
+      { sessionKey: "s-1004f" },
     );
 
     await agentEnd(
       {
-        sessionKey: "s-994f",
+        sessionKey: "s-1004f",
         agentId: "a1",
         success: true,
-        // agent_end derives token counts from the assistant messages array
-        // (see fallback branch — no diagnostic events in this test).
         messages: [
           {
             role: "assistant",
@@ -2714,29 +2722,30 @@ describe("ISI-994: GenAI / code semconv dual-emit (schema 1.2.x)", () => {
           },
         ],
       },
-      { sessionKey: "s-994f" },
+      { sessionKey: "s-1004f" },
     );
 
     const llmCall = spans.find((s) => s.spanName === "openclaw.llm.call");
     expect(llmCall).toBeDefined();
-    // Both legacy + stable cache halves must be present on the safety-net
-    // close path so a 1.3.0 cleanup cannot silently drop one direction.
-    expect(llmCall!.attrs["gen_ai.usage.cache_read_tokens"]).toBe(1200);
+    // Only stable cache halves emitted; legacy keys gone.
     expect(llmCall!.attrs["gen_ai.usage.cache_read.input_tokens"]).toBe(1200);
-    expect(llmCall!.attrs["gen_ai.usage.cache_write_tokens"]).toBe(60);
     expect(llmCall!.attrs["gen_ai.usage.cache_creation.input_tokens"]).toBe(60);
+    expect(llmCall!.attrs["gen_ai.usage.cache_read_tokens"]).toBeUndefined();
+    expect(llmCall!.attrs["gen_ai.usage.cache_write_tokens"]).toBeUndefined();
+
+    // The agent turn span itself must also stop emitting total_tokens.
+    const agentTurn = spans.find((s) => s.spanName === "openclaw.agent.turn");
+    expect(agentTurn).toBeDefined();
+    expect(agentTurn!.attrs["gen_ai.usage.total_tokens"]).toBeUndefined();
   });
 });
 
-// ── ISI-994: diagnostics module dual-emit ────────────────────────────
+// ── ISI-1004: diagnostics module legacy removal ─────────────────────
 //
-// Pins the dual-emit invariants for `enrichSpanWithUsage` directly. This
-// is the path that fires when `model.usage` diagnostic events arrive
-// after the agent_end span has already been opened — the cache + provider
-// dual-emit lives here and is otherwise not exercised by the hooks tests.
+// Mirrors the hook-level removal tests above for `enrichSpanWithUsage`.
 
-describe("ISI-994: diagnostics.enrichSpanWithUsage dual-emit (schema 1.2.x)", () => {
-  it("dual-emits cache_*_tokens (legacy) + cache_*.input_tokens (stable)", () => {
+describe("ISI-1004: diagnostics.enrichSpanWithUsage legacy removal (schema 1.3.0)", () => {
+  it("emits only stable cache_*.input_tokens (no legacy cache_*_tokens)", () => {
     const span = createSpanSpy("openclaw.agent.turn");
     enrichSpanWithUsage(span, {
       usage: {
@@ -2749,15 +2758,15 @@ describe("ISI-994: diagnostics.enrichSpanWithUsage dual-emit (schema 1.2.x)", ()
     });
 
     const spy = span as unknown as SpanSpy;
-    // Legacy cache keys still emitted
-    expect(spy.attrs["gen_ai.usage.cache_read_tokens"]).toBe(800);
-    expect(spy.attrs["gen_ai.usage.cache_write_tokens"]).toBe(40);
-    // Stable cache replacements emitted alongside
+    // Stable replacements present
     expect(spy.attrs["gen_ai.usage.cache_read.input_tokens"]).toBe(800);
     expect(spy.attrs["gen_ai.usage.cache_creation.input_tokens"]).toBe(40);
+    // Legacy keys removed
+    expect(spy.attrs["gen_ai.usage.cache_read_tokens"]).toBeUndefined();
+    expect(spy.attrs["gen_ai.usage.cache_write_tokens"]).toBeUndefined();
   });
 
-  it("dual-emits gen_ai.system (legacy) + gen_ai.provider.name (stable)", () => {
+  it("emits only stable gen_ai.provider.name (no legacy gen_ai.system)", () => {
     const span = createSpanSpy("openclaw.agent.turn");
     enrichSpanWithUsage(span, {
       usage: {},
@@ -2766,13 +2775,12 @@ describe("ISI-994: diagnostics.enrichSpanWithUsage dual-emit (schema 1.2.x)", ()
     });
 
     const spy = span as unknown as SpanSpy;
-    expect(spy.attrs["gen_ai.system"]).toBe("anthropic");
     expect(spy.attrs["gen_ai.provider.name"]).toBe("anthropic");
-    // gen_ai.response.model is emitted via the constant, not a raw string.
+    expect(spy.attrs["gen_ai.system"]).toBeUndefined();
     expect(spy.attrs["gen_ai.response.model"]).toBe("claude-3.5-sonnet");
   });
 
-  it("still emits the deprecated gen_ai.usage.total_tokens during the dual-emit window", () => {
+  it("no longer emits gen_ai.usage.total_tokens", () => {
     const span = createSpanSpy("openclaw.agent.turn");
     enrichSpanWithUsage(span, {
       usage: { input: 100, output: 50, total: 150 },
@@ -2781,7 +2789,7 @@ describe("ISI-994: diagnostics.enrichSpanWithUsage dual-emit (schema 1.2.x)", ()
     const spy = span as unknown as SpanSpy;
     expect(spy.attrs["gen_ai.usage.input_tokens"]).toBe(100);
     expect(spy.attrs["gen_ai.usage.output_tokens"]).toBe(50);
-    expect(spy.attrs["gen_ai.usage.total_tokens"]).toBe(150);
+    expect(spy.attrs["gen_ai.usage.total_tokens"]).toBeUndefined();
   });
 });
 

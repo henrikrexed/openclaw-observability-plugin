@@ -11,7 +11,6 @@ openclaw.request (SERVER span — full message lifecycle)
 ├── openclaw.agent.turn (INTERNAL — LLM processing)
 │   ├── gen_ai.usage.input_tokens: 4521
 │   ├── gen_ai.usage.output_tokens: 892
-│   ├── gen_ai.usage.total_tokens: 5413
 │   ├── gen_ai.response.model: claude-opus-4-5
 │   ├── tool.exec (INTERNAL — 156ms)
 │   ├── tool.Read (INTERNAL — 12ms)
@@ -67,8 +66,10 @@ See [CHANGELOG](../../CHANGELOG.md) and ISI-730 for the migration details.
 | `openclaw.agent.error` | string | Error message (if failed) |
 | `gen_ai.usage.input_tokens` | int | Total input tokens (including cache read/write) |
 | `gen_ai.usage.output_tokens` | int | Total output tokens |
-| `gen_ai.usage.total_tokens` | int | Sum of input + output tokens |
 | `gen_ai.response.model` | string | Actual model used (from last assistant message) |
+
+> Schema `1.3.0` (ISI-1004) removed `gen_ai.usage.total_tokens` — compute
+> it as `gen_ai.usage.input_tokens + gen_ai.usage.output_tokens`.
 
 !!! note "`gen_ai.request.model` on the turn span"
     The agent turn span no longer carries `gen_ai.request.model` — in
@@ -149,7 +150,8 @@ Stale contexts (no `agent_end` within 5 minutes) are automatically cleaned up.
 fetch spans, samplingRatio:1
 | filter contains(endpoint.name, "openclaw.agent.turn")
 | fields start_time, duration, gen_ai.usage.input_tokens,
-         gen_ai.usage.output_tokens, gen_ai.usage.total_tokens,
+         gen_ai.usage.output_tokens,
+         total_tokens = toLong(gen_ai.usage.input_tokens) + toLong(gen_ai.usage.output_tokens),
          gen_ai.response.model
 | sort start_time desc
 | limit 20

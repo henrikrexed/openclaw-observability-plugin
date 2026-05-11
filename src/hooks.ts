@@ -57,7 +57,6 @@ import {
   GEN_AI_RESPONSE_FINISH_REASONS,
   GEN_AI_RESPONSE_ID,
   GEN_AI_RESPONSE_MODEL,
-  GEN_AI_SYSTEM,
   GEN_AI_TOKEN_TYPE,
   GEN_AI_TOOL_CALL_ID,
   GEN_AI_TOOL_NAME,
@@ -66,18 +65,13 @@ import {
   OPENCLAW_TOOL_APPROVAL_DURATION_MS,
   GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
   GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
-  GEN_AI_USAGE_CACHE_READ_TOKENS,
-  GEN_AI_USAGE_CACHE_WRITE_TOKENS,
   GEN_AI_USAGE_INPUT_TOKENS,
   GEN_AI_USAGE_OUTPUT_TOKENS,
-  GEN_AI_USAGE_TOTAL_TOKENS,
   OP_CHAT,
   OP_EXECUTE_TOOL,
   OP_INVOKE_AGENT,
   TOKEN_TYPE_INPUT,
   TOKEN_TYPE_OUTPUT,
-  CODE_FUNCTION,
-  CODE_NAMESPACE,
   CODE_FUNCTION_NAME,
   CODE_FILE_PATH,
   ERROR_TYPE,
@@ -105,20 +99,17 @@ const CODE_NS = "openclaw.otel.hooks";
 const CODE_FILE = "src/hooks.ts";
 
 /**
- * Dual-emits legacy (`code.function` / `code.namespace`) and stable
- * (`code.function.name` / `code.file.path`) attributes for a hook span.
- * Spread the result into the span `attributes` block.
+ * Emits the stable OTel `code.function.name` + `code.file.path` attributes
+ * for a hook span. Spread the result into the span `attributes` block.
  *
  * `filePath` defaults to this module's `CODE_FILE`; callers from other
  * modules MUST pass their own path so `code.file.path` does not lie.
  *
- * Centralised so the deprecation window can be closed in one place
- * (schema `1.3.0`) by dropping the legacy keys from this helper.
+ * The legacy `code.function` / `code.namespace` keys were dropped in
+ * schema `1.3.0` (ISI-1004) after the dual-emit window opened in `1.2.0`.
  */
 function codeAttrs(funcName: string, filePath: string = CODE_FILE): Record<string, string> {
   return {
-    [CODE_FUNCTION]: funcName,
-    [CODE_NAMESPACE]: CODE_NS,
     [CODE_FUNCTION_NAME]: `${CODE_NS}.${funcName}`,
     [CODE_FILE_PATH]: filePath,
   };
@@ -630,10 +621,7 @@ export function registerHooks(
           {
             kind: SpanKind.CLIENT,
             attributes: {
-              // GenAI stable — dual-emit gen_ai.system (legacy) + gen_ai.provider.name
-              // for the schema 1.2.x deprecation window.
               [GEN_AI_OPERATION_NAME]: OP_CHAT,
-              [GEN_AI_SYSTEM]: provider,
               [GEN_AI_PROVIDER_NAME]: provider,
               [GEN_AI_REQUEST_MODEL]: model,
               [GEN_AI_CONVERSATION_ID]: sessionKey,
@@ -695,8 +683,6 @@ export function registerHooks(
           usage.output ?? usage.outputTokens ?? usage.output_tokens ?? 0;
         const cacheRead = usage.cacheRead ?? usage.cache_read_tokens ?? 0;
         const cacheWrite = usage.cacheWrite ?? usage.cache_write_tokens ?? 0;
-        const totalTokens =
-          usage.total ?? inputTokens + outputTokens + cacheRead + cacheWrite;
 
         llmSpan.setAttribute(GEN_AI_RESPONSE_MODEL, responseModel);
         if (inputTokens > 0) {
@@ -705,18 +691,13 @@ export function registerHooks(
         if (outputTokens > 0) {
           llmSpan.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, outputTokens);
         }
-        // Dual-emit legacy (`cache_*_tokens`) + stable (`cache_*.input_tokens`)
-        // forms during the schema 1.2.x deprecation window.
+        // Stable `cache_*.input_tokens` only (legacy `cache_*_tokens` and
+        // `gen_ai.usage.total_tokens` dropped in schema 1.3.0 / ISI-1004).
         if (cacheRead > 0) {
-          llmSpan.setAttribute(GEN_AI_USAGE_CACHE_READ_TOKENS, cacheRead);
           llmSpan.setAttribute(GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS, cacheRead);
         }
         if (cacheWrite > 0) {
-          llmSpan.setAttribute(GEN_AI_USAGE_CACHE_WRITE_TOKENS, cacheWrite);
           llmSpan.setAttribute(GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, cacheWrite);
-        }
-        if (totalTokens > 0) {
-          llmSpan.setAttribute(GEN_AI_USAGE_TOTAL_TOKENS, totalTokens);
         }
 
         const durationMs =
@@ -783,7 +764,6 @@ export function registerHooks(
             kind: SpanKind.CLIENT,
             attributes: {
               [GEN_AI_OPERATION_NAME]: OP_CHAT,
-              [GEN_AI_SYSTEM]: provider,
               [GEN_AI_PROVIDER_NAME]: provider,
               [GEN_AI_REQUEST_MODEL]: model,
               [GEN_AI_CONVERSATION_ID]: sessionKey,
@@ -856,11 +836,6 @@ export function registerHooks(
           usage.cacheReadInputTokens ?? usage.cache_read_input_tokens ?? 0;
         const cacheCreationInputTokens =
           usage.cacheCreationInputTokens ?? usage.cache_creation_input_tokens ?? 0;
-        const cacheRead = usage.cacheRead ?? usage.cache_read_tokens ?? 0;
-        const cacheWrite = usage.cacheWrite ?? usage.cache_write_tokens ?? 0;
-        const totalTokens =
-          usage.total ?? inputTokens + outputTokens + cacheRead + cacheWrite;
-
         span.setAttribute(GEN_AI_RESPONSE_MODEL, responseModel);
         if (typeof responseId === "string" && responseId) {
           span.setAttribute(GEN_AI_RESPONSE_ID, responseId);
@@ -887,9 +862,6 @@ export function registerHooks(
         }
         if (cacheCreationInputTokens > 0) {
           span.setAttribute(GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, cacheCreationInputTokens);
-        }
-        if (totalTokens > 0) {
-          span.setAttribute(GEN_AI_USAGE_TOTAL_TOKENS, totalTokens);
         }
 
         const durationMs =
@@ -1713,16 +1685,15 @@ export function registerHooks(
             if (totalOutputTokens > 0) {
               sessionCtx.llmSpan.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, totalOutputTokens);
             }
-            // Dual-emit legacy + stable cache attribute forms.
+            // Stable `cache_*.input_tokens` only — legacy keys dropped in
+            // schema 1.3.0 (ISI-1004).
             if (cacheReadTokens > 0) {
-              sessionCtx.llmSpan.setAttribute(GEN_AI_USAGE_CACHE_READ_TOKENS, cacheReadTokens);
               sessionCtx.llmSpan.setAttribute(
                 GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
                 cacheReadTokens,
               );
             }
             if (cacheWriteTokens > 0) {
-              sessionCtx.llmSpan.setAttribute(GEN_AI_USAGE_CACHE_WRITE_TOKENS, cacheWriteTokens);
               sessionCtx.llmSpan.setAttribute(
                 GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
                 cacheWriteTokens,
@@ -1779,10 +1750,11 @@ export function registerHooks(
             agentSpan.setAttribute("openclaw.agent.duration_ms", durationMs);
           }
 
-          // Token usage — GenAI semantic convention attributes
+          // Token usage — stable GenAI semconv attributes only.
+          // `gen_ai.usage.total_tokens` dropped in schema 1.3.0 (ISI-1004);
+          // consumers compute `input + output` themselves.
           agentSpan.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, totalInputTokens);
           agentSpan.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, totalOutputTokens);
-          agentSpan.setAttribute(GEN_AI_USAGE_TOTAL_TOKENS, totalTokens);
           agentSpan.setAttribute(GEN_AI_RESPONSE_MODEL, model);
           agentSpan.setAttribute("openclaw.agent.success", success);
 
@@ -1790,13 +1762,11 @@ export function registerHooks(
             agentSpan.setAttribute(GEN_AI_PROVIDER_NAME, diagUsage.provider);
           }
 
-          // Cache tokens — dual-emit legacy + stable input_tokens forms.
+          // Cache tokens — stable `cache_*.input_tokens` only.
           if (cacheReadTokens > 0) {
-            agentSpan.setAttribute(GEN_AI_USAGE_CACHE_READ_TOKENS, cacheReadTokens);
             agentSpan.setAttribute(GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS, cacheReadTokens);
           }
           if (cacheWriteTokens > 0) {
-            agentSpan.setAttribute(GEN_AI_USAGE_CACHE_WRITE_TOKENS, cacheWriteTokens);
             agentSpan.setAttribute(GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, cacheWriteTokens);
           }
 
