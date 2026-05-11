@@ -4,6 +4,22 @@ All notable changes to the `@henrikrexed/openclaw-otel-observability` plugin are
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Granular content capture policy (ISI-1000).** The `captureContent`
+  plugin option now accepts a `ContentCapturePolicy` object with five
+  per-category flags (`inputMessages`, `outputMessages`, `toolInputs`,
+  `toolOutputs`, `systemPrompt`) in addition to the legacy single boolean.
+  Each flag gates one or more `openclaw.content.*` span attributes (capped
+  at 8 KB per value). The legacy boolean still works — `true` enables all
+  five flags, `false` disables them. Traceloop's `traceContent` is derived
+  from `inputMessages || outputMessages || systemPrompt`.
+- New env var `OPENCLAW_OTEL_CONTENT_POLICY` (JSON) bridges the policy to
+  the ESM preload. Takes precedence over the legacy
+  `OPENCLAW_OTEL_CAPTURE_CONTENT` when both are set.
+
 ## [0.3.1] — 2026-05-10
 
 ### Added

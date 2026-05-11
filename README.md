@@ -385,7 +385,7 @@ The following settings are controlled via the `diagnostics.otel` config block:
 | `traces` | boolean | true | Enable traces |
 | `metrics` | boolean | true | Enable metrics |
 | `logs` | boolean | true | Enable OTLP log export via diagnostic events |
-| `captureContent` | boolean | false | Capture LLM prompt/completion text (privacy-sensitive) |
+| `captureContent` | boolean \| `ContentCapturePolicy` | `false` (all off) | Capture prompt/completion/tool content on spans. Accepts a boolean (all-on or all-off, legacy) or a granular object with the per-category flags `inputMessages`, `outputMessages`, `toolInputs`, `toolOutputs`, `systemPrompt`. Privacy-sensitive — see [docs/security/privacy.md](./docs/security/privacy.md). |
 | `metricsIntervalMs` | number | 30000 | Metric export interval in milliseconds |
 
 ### Log Pipeline Configuration

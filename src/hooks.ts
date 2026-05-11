@@ -35,7 +35,7 @@
 
 import { SpanKind, SpanStatusCode, context, trace, type Span, type Context } from "@opentelemetry/api";
 import type { TelemetryRuntime } from "./telemetry.js";
-import type { OtelObservabilityConfig } from "./config.js";
+import type { ContentCapturePolicy, OtelObservabilityConfig } from "./config.js";
 import { activeAgentSpans, getPendingUsage, enrichSpanWithUsage, hasDiagnosticsSupport } from "./diagnostics.js";
 import { checkToolSecurity, checkMessageSecurity, type SecurityCounters } from "./security.js";
 import { TraceContextStore } from "./trace-context-store.js";
@@ -127,6 +127,58 @@ export function registerHooks(
     }
   }
 
+  // ── Granular content capture (ISI-1000) ──────────────────────────
+  // `config.captureContent` is normalized to a fully populated
+  // `ContentCapturePolicy` in `parseConfig`. Each `openclaw.content.*`
+  // attribute is gated by exactly one policy flag; default policy is
+  // all-off, preserving the legacy `captureContent: false` behavior.
+  //
+  // Capture size is capped per attribute to keep span payloads bounded.
+  // Operators who enable content capture accept the privacy implications
+  // documented in `docs/security/privacy.md`.
+  const contentPolicy: ContentCapturePolicy = config.captureContent;
+  const CONTENT_MAX_CHARS = 8192;
+
+  function captureContentAttribute(
+    span: any,
+    enabled: boolean,
+    key: string,
+    raw: unknown,
+  ): void {
+    if (!enabled || !span) return;
+    if (raw === undefined || raw === null) return;
+    let text: string;
+    if (typeof raw === "string") {
+      text = raw;
+    } else {
+      try {
+        text = JSON.stringify(raw);
+      } catch {
+        return;
+      }
+    }
+    if (!text) return;
+    if (text.length > CONTENT_MAX_CHARS) {
+      const overflow = text.length - CONTENT_MAX_CHARS;
+      text = `${text.slice(0, CONTENT_MAX_CHARS)}…(truncated, ${overflow} more chars)`;
+    }
+    span.setAttribute(key, text);
+  }
+
+  function extractToolOutputText(message: any): string | undefined {
+    if (!message) return undefined;
+    if (typeof message === "string") return message;
+    const contentArray = message?.content;
+    if (Array.isArray(contentArray)) {
+      const parts = contentArray
+        .filter((c: any) => c && c.type === "text" && typeof c.text === "string")
+        .map((c: any) => c.text as string);
+      if (parts.length > 0) return parts.join("\n");
+    }
+    if (typeof message?.text === "string") return message.text;
+    return undefined;
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   // TYPED HOOKS — registered via api.on() into registry.typedHooks
   // ═══════════════════════════════════════════════════════════════════
@@ -178,6 +230,14 @@ export function registerHooks(
             logger.warn?.(`[otel] SECURITY: ${securityEvent.detection} - ${securityEvent.description}`);
           }
         }
+
+        // Content capture (ISI-1000) — inbound user message text.
+        captureContentAttribute(
+          rootSpan,
+          contentPolicy.inputMessages,
+          "openclaw.content.input_message",
+          messageText,
+        );
 
         // Store the context so child spans can reference it
         const rootContext = trace.setSpan(context.active(), rootSpan);
@@ -430,6 +490,34 @@ export function registerHooks(
 
         agentSpan.setAttribute("openclaw.prompt.chars", prompt.length);
         agentSpan.setAttribute("openclaw.session.message_count", messagesArr.length);
+
+        // Content capture (ISI-1000).
+        captureContentAttribute(
+          agentSpan,
+          contentPolicy.inputMessages,
+          "openclaw.content.prompt",
+          prompt,
+        );
+        if (contentPolicy.inputMessages && messagesArr.length > 0) {
+          captureContentAttribute(
+            agentSpan,
+            true,
+            "openclaw.content.messages",
+            messagesArr,
+          );
+        }
+        const systemPrompt =
+          typeof event?.systemPrompt === "string"
+            ? event.systemPrompt
+            : typeof event?.system === "string"
+              ? event.system
+              : undefined;
+        captureContentAttribute(
+          agentSpan,
+          contentPolicy.systemPrompt,
+          "openclaw.content.system_prompt",
+          systemPrompt,
+        );
       } catch {
         // Never let telemetry errors break the main flow
       }
@@ -912,6 +1000,14 @@ export function registerHooks(
 
         setToolInputPreview(span, toolInput);
 
+        // Content capture (ISI-1000) — full tool input, gated by policy.
+        captureContentAttribute(
+          span,
+          contentPolicy.toolInputs,
+          "openclaw.content.tool_input",
+          toolInput,
+        );
+
         if (requiresApproval) {
           span.setAttribute(GEN_AI_TOOL_APPROVAL_REQUESTED, true);
           counters.toolApprovals.add(1, {
@@ -987,6 +1083,14 @@ export function registerHooks(
             span.setAttribute("openclaw.tool.result_chars", totalChars);
             span.setAttribute("openclaw.tool.result_parts", contentArray.length);
           }
+
+          // Content capture (ISI-1000) — tool output text.
+          captureContentAttribute(
+            span,
+            contentPolicy.toolOutputs,
+            "openclaw.content.tool_output",
+            extractToolOutputText(message),
+          );
 
           if (message?.is_error === true || message?.isError === true) {
             counters.toolErrors.add(1, {
@@ -1116,6 +1220,15 @@ export function registerHooks(
             setToolInputPreview(span, toolInput);
           }
 
+          // Content capture (ISI-1000) — tool input persists onto the
+          // pre-existing tool span (created in before_tool_call). Gated.
+          captureContentAttribute(
+            span,
+            contentPolicy.toolInputs,
+            "openclaw.content.tool_input",
+            toolInput,
+          );
+
           const message = event?.message;
           if (message) {
             const contentArray = message?.content;
@@ -1126,6 +1239,13 @@ export function registerHooks(
               const totalChars = textParts.reduce((sum: number, t: string) => sum + t.length, 0);
               span.setAttribute("openclaw.tool.result_chars", totalChars);
             }
+
+            captureContentAttribute(
+              span,
+              contentPolicy.toolOutputs,
+              "openclaw.content.tool_output",
+              extractToolOutputText(message),
+            );
 
             if (message?.is_error === true || message?.isError === true) {
               span.setAttribute(ERROR_TYPE, "tool_execution_error");
@@ -1179,6 +1299,14 @@ export function registerHooks(
           setToolInputPreview(span, toolInput);
         }
 
+        // Content capture (ISI-1000) on the fallback-created tool span.
+        captureContentAttribute(
+          span,
+          contentPolicy.toolInputs,
+          "openclaw.content.tool_input",
+          toolInput,
+        );
+
         const message = event?.message;
         if (message) {
           const contentArray = message?.content;
@@ -1190,6 +1318,13 @@ export function registerHooks(
             span.setAttribute("openclaw.tool.result_chars", totalChars);
             span.setAttribute("openclaw.tool.result_parts", contentArray.length);
           }
+
+          captureContentAttribute(
+            span,
+            contentPolicy.toolOutputs,
+            "openclaw.content.tool_output",
+            extractToolOutputText(message),
+          );
 
           if (message?.is_error === true || message?.isError === true) {
             counters.toolErrors.add(1, {
@@ -1263,6 +1398,14 @@ export function registerHooks(
         counters.messagesSent.add(1, {
           "openclaw.message.channel": channel,
         });
+
+        // Content capture (ISI-1000) — outbound assistant reply text.
+        captureContentAttribute(
+          span,
+          contentPolicy.outputMessages,
+          "openclaw.content.output_message",
+          messageText,
+        );
 
         span.setStatus({ code: SpanStatusCode.OK });
         span.end();

@@ -13,7 +13,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Counter, Histogram, Span, Tracer, UpDownCounter } from "@opentelemetry/api";
 
 import { registerHooks } from "../src/hooks.js";
-import type { OtelObservabilityConfig } from "../src/config.js";
+import {
+  CONTENT_POLICY_DISABLED,
+  CONTENT_POLICY_ENABLED,
+  type OtelObservabilityConfig,
+} from "../src/config.js";
 import type { TelemetryRuntime } from "../src/telemetry.js";
 
 // ── Test doubles ────────────────────────────────────────────────────
@@ -185,10 +189,19 @@ const config: OtelObservabilityConfig = {
   traces: true,
   metrics: true,
   logs: false,
-  captureContent: false,
+  captureContent: { ...CONTENT_POLICY_DISABLED },
   metricsIntervalMs: 30_000,
   resourceAttributes: {},
 };
+
+function configWithPolicy(
+  overrides: Partial<typeof CONTENT_POLICY_DISABLED> = {},
+): OtelObservabilityConfig {
+  return {
+    ...config,
+    captureContent: { ...CONTENT_POLICY_DISABLED, ...overrides },
+  };
+}
 
 // ── Tests ───────────────────────────────────────────────────────────
 
@@ -2052,3 +2065,235 @@ describe("cron_changed / cron_executed hooks (ISI-929)", () => {
     });
   });
 });
+
+// ── ContentCapturePolicy gating (ISI-1000) ──────────────────────────
+
+describe("content capture policy gating (ISI-1000)", () => {
+  let stopHooks: () => void;
+
+  it("emits no openclaw.content.* attributes when policy is all-off", async () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const received = typedHooks.get("message_received")!;
+    await Promise.resolve(
+      received(
+        { channel: "cli", sessionKey: "s1", from: "user", text: "secret prompt" },
+        { sessionKey: "s1" },
+      ),
+    );
+
+    typedHooks.get("before_model_resolve")!(
+      {},
+      { agentId: "a1", sessionKey: "s1" },
+    );
+    typedHooks.get("before_prompt_build")!(
+      {
+        prompt: "user content",
+        messages: [{ role: "user", content: "x" }],
+        systemPrompt: "be helpful",
+      },
+      { agentId: "a1", sessionKey: "s1" },
+    );
+    typedHooks.get("message_sent")!(
+      { sessionKey: "s1", channel: "cli", to: "user", text: "reply text" },
+      { sessionKey: "s1" },
+    );
+
+    for (const span of spans) {
+      for (const key of Object.keys(span.attrs)) {
+        expect(
+          key.startsWith("openclaw.content."),
+          `unexpected content attribute "${key}" with policy=all-off`,
+        ).toBe(false);
+      }
+    }
+
+    stopHooks();
+  });
+
+  it("inputMessages=true captures inbound user text + prompt + messages", async () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ inputMessages: true }),
+    );
+
+    await Promise.resolve(
+      typedHooks.get("message_received")!(
+        { channel: "cli", sessionKey: "s1", from: "user", text: "hello" },
+        { sessionKey: "s1" },
+      ),
+    );
+    typedHooks.get("before_model_resolve")!(
+      {},
+      { agentId: "a1", sessionKey: "s1" },
+    );
+    typedHooks.get("before_prompt_build")!(
+      {
+        prompt: "hello prompt",
+        messages: [{ role: "user", content: "hi" }],
+      },
+      { agentId: "a1", sessionKey: "s1" },
+    );
+
+    const request = spans.find((s) => s.spanName === "openclaw.request");
+    const turn = spans.find((s) => s.spanName === "openclaw.agent.turn");
+    expect(request!.attrs["openclaw.content.input_message"]).toBe("hello");
+    expect(turn!.attrs["openclaw.content.prompt"]).toBe("hello prompt");
+    expect(turn!.attrs["openclaw.content.messages"]).toEqual(
+      JSON.stringify([{ role: "user", content: "hi" }]),
+    );
+    // systemPrompt is gated separately
+    expect(turn!.attrs["openclaw.content.system_prompt"]).toBeUndefined();
+
+    stopHooks();
+  });
+
+  it("systemPrompt=true is independent of inputMessages", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ systemPrompt: true }),
+    );
+
+    typedHooks.get("before_model_resolve")!(
+      {},
+      { agentId: "a1", sessionKey: "s1" },
+    );
+    typedHooks.get("before_prompt_build")!(
+      {
+        prompt: "user-only",
+        messages: [{ role: "user", content: "x" }],
+        systemPrompt: "be helpful and safe",
+      },
+      { agentId: "a1", sessionKey: "s1" },
+    );
+
+    const turn = spans.find((s) => s.spanName === "openclaw.agent.turn");
+    expect(turn!.attrs["openclaw.content.system_prompt"]).toBe(
+      "be helpful and safe",
+    );
+    expect(turn!.attrs["openclaw.content.prompt"]).toBeUndefined();
+    expect(turn!.attrs["openclaw.content.messages"]).toBeUndefined();
+
+    stopHooks();
+  });
+
+  it("outputMessages=true captures outbound reply text on message.sent span", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ outputMessages: true }),
+    );
+
+    typedHooks.get("message_sent")!(
+      { sessionKey: "s1", channel: "cli", to: "user", text: "the reply" },
+      { sessionKey: "s1" },
+    );
+
+    const sent = spans.find((s) => s.spanName === "openclaw.message.sent");
+    expect(sent!.attrs["openclaw.content.output_message"]).toBe("the reply");
+
+    stopHooks();
+  });
+
+  it("toolInputs=true captures tool args; toolOutputs=true captures result text", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ toolInputs: true, toolOutputs: true }),
+    );
+
+    // Tools live under an active session — set up message_received first.
+    return Promise.resolve(
+      typedHooks.get("message_received")!(
+        { channel: "cli", sessionKey: "s1", from: "u" },
+        { sessionKey: "s1" },
+      ),
+    ).then(() => {
+      typedHooks.get("before_tool_call")!(
+        {
+          toolName: "Read",
+          toolCallId: "call-1",
+          input: { path: "/tmp/file.txt" },
+        },
+        { sessionKey: "s1", agentId: "a1" },
+      );
+      typedHooks.get("after_tool_call")!(
+        {
+          toolName: "Read",
+          toolCallId: "call-1",
+          sessionKey: "s1",
+          message: {
+            content: [{ type: "text", text: "hello world" }],
+          },
+        },
+        { sessionKey: "s1" },
+      );
+
+      const tool = spans.find((s) => s.spanName === "execute_tool Read");
+      expect(tool).toBeDefined();
+      expect(tool!.attrs["openclaw.content.tool_input"]).toBe(
+        JSON.stringify({ path: "/tmp/file.txt" }),
+      );
+      expect(tool!.attrs["openclaw.content.tool_output"]).toBe("hello world");
+
+      stopHooks();
+    });
+  });
+
+  it("truncates content captures longer than 8 KB with an inline marker", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ outputMessages: true }),
+    );
+
+    const big = "x".repeat(10_000);
+    typedHooks.get("message_sent")!(
+      { sessionKey: "s1", channel: "cli", to: "user", text: big },
+      { sessionKey: "s1" },
+    );
+
+    const sent = spans.find((s) => s.spanName === "openclaw.message.sent");
+    const captured = sent!.attrs["openclaw.content.output_message"] as string;
+    expect(captured.length).toBeLessThanOrEqual(10_000);
+    expect(captured).toMatch(/^x{8192}…\(truncated, 1808 more chars\)$/);
+
+    stopHooks();
+  });
+
+  it("captures nothing for null/undefined values even when the flag is on", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ ...CONTENT_POLICY_ENABLED }),
+    );
+
+    typedHooks.get("message_sent")!(
+      // text is missing
+      { sessionKey: "s1", channel: "cli", to: "user" },
+      { sessionKey: "s1" },
+    );
+
+    const sent = spans.find((s) => s.spanName === "openclaw.message.sent");
+    expect(sent!.attrs["openclaw.content.output_message"]).toBeUndefined();
+
+    stopHooks();
+  });
+});
+

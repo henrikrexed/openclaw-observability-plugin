@@ -1,12 +1,19 @@
 # Privacy: `captureContent`
 
-The `captureContent` plugin option controls whether the Traceloop LLM-client instrumentations (`@traceloop/instrumentation-anthropic`, `@traceloop/instrumentation-openai`) record the **actual prompt and completion text** of every LLM call as span attributes.
+The `captureContent` plugin option controls whether prompt, completion, and tool content text is recorded on spans. It accepts either:
 
-Default: `false` (privacy-first).
+- a **single boolean** — `true` turns every category on, `false` turns every category off (legacy shape), or
+- a granular **`ContentCapturePolicy`** object with the per-category flags `inputMessages`, `outputMessages`, `toolInputs`, `toolOutputs`, `systemPrompt` (ISI-1000).
+
+Default: every flag is `false` (privacy-first).
 
 ## What `captureContent` controls
 
-With `captureContent: true`, Traceloop LLM-client spans include:
+`captureContent` now controls **two surfaces**: the Traceloop LLM-client spans and the plugin's own hook-surface spans. The granular policy lets you turn each category on or off independently.
+
+### Traceloop LLM-client spans (via the preload)
+
+Traceloop instrumentations (`@traceloop/instrumentation-anthropic`, `@traceloop/instrumentation-openai`) accept a single `traceContent` boolean. The plugin derives it as `inputMessages || outputMessages || systemPrompt` — the three categories that map to prompt/completion text. When the derived boolean is `true`, Traceloop LLM-client spans include:
 
 | Span attribute | Contents |
 |----------------|----------|
@@ -15,18 +22,32 @@ With `captureContent: true`, Traceloop LLM-client spans include:
 | `gen_ai.completion.N.role` | Role of the model's response. |
 | `gen_ai.completion.N.content` | **Full generated text** from the model. |
 
-With `captureContent: false`, those attributes are **omitted**. Token counts, model identifiers, latency, cost, and error state are still recorded — the behavioral metrics are unchanged.
+Token counts, model identifiers, latency, cost, and error state are recorded regardless of the flag — only the prompt/completion text is gated.
+
+### Plugin hook-surface spans (`openclaw.content.*`)
+
+Each policy flag also gates one or more `openclaw.content.*` attributes on the plugin's own spans:
+
+| Flag | Span attribute(s) | What is captured |
+|------|--------------------|-------------------|
+| `inputMessages` | `openclaw.content.input_message` on `openclaw.request`; `openclaw.content.prompt` / `openclaw.content.messages` on `openclaw.agent.turn` | Inbound user message text + the prompt and message history passed to the LLM |
+| `outputMessages` | `openclaw.content.output_message` on `openclaw.message.sent` | Outbound assistant reply text |
+| `toolInputs` | `openclaw.content.tool_input` on `execute_tool <tool>` | Full tool-call input arguments (JSON-stringified) |
+| `toolOutputs` | `openclaw.content.tool_output` on `execute_tool <tool>` | Tool-call result text (text parts only) |
+| `systemPrompt` | `openclaw.content.system_prompt` on `openclaw.agent.turn` | System prompt text |
+
+All `openclaw.content.*` attributes are truncated to 8 KB per value. Larger payloads get an inline `…(truncated, N more chars)` marker.
 
 ## What `captureContent` does **not** affect
 
-`captureContent` only gates the Traceloop LLM-client spans described above. It does **not** touch the plugin's own hook-surface spans, which already emit only metadata:
+`captureContent` only gates the prompt/completion/tool content attributes above. Independent of the policy, hook spans still emit metadata such as:
 
 - `openclaw.request` — session/channel identifiers, no message body
-- `openclaw.agent.turn` — token counts, model, duration; no prompt/completion text
-- `tool.*` — tool name, duration, truncated input/result **preview** only (see `src/security.ts` for redaction rules)
-- `message_sent` — metadata only
+- `openclaw.agent.turn` — token counts, model, duration
+- `execute_tool *` — tool name, duration, `openclaw.tool.input_preview` (1 KB truncated preview), result chars/parts counts
+- `openclaw.message.sent` — channel, recipient, char count
 
-If you need to exclude tool-call previews too, that is controlled separately in the hook layer, not by `captureContent`.
+The `openclaw.tool.input_preview` preview attribute is **always** emitted, independent of `toolInputs`. It is a 1 KB capped preview meant for debugging and security correlation; the granular `openclaw.content.tool_input` is the larger 8 KB capture that the policy gates.
 
 ## Gateway-launch setting (not hot-reloadable)
 
@@ -36,11 +57,16 @@ Consequence: changing `captureContent` in `openclaw.json` mid-run has no effect 
 
 ### Bridge mechanism
 
-The preload reads the `OPENCLAW_OTEL_CAPTURE_CONTENT` environment variable. The plugin's `start()` phase re-exports this env var from the parsed plugin config so subprocesses inherit the intended value, and warns if the preload resolved to a different value than the plugin config requests.
+The preload reads **two** environment variables and prefers the granular one:
+
+- `OPENCLAW_OTEL_CONTENT_POLICY` — JSON encoding of the `ContentCapturePolicy` object. When set and parseable, Traceloop's `traceContent` is derived as `inputMessages || outputMessages || systemPrompt`. **This var takes precedence.**
+- `OPENCLAW_OTEL_CAPTURE_CONTENT` — legacy single-boolean flag. The string value must be exactly `true` to enable; anything else (including `1`, `yes`, `True`, unset) resolves to `false`. Strict match keeps the privacy default unambiguous.
+
+The plugin's `start()` phase re-exports both env vars from the parsed plugin config so subprocesses inherit the intended values, and warns if the preload-resolved `traceContent` does not match the policy.
 
 ### How to enable
 
-Set the env var **before** the gateway process starts:
+#### All categories on (legacy boolean)
 
 ```bash
 OPENCLAW_OTEL_CAPTURE_CONTENT=true \
@@ -48,11 +74,21 @@ OPENCLAW_OTEL_CAPTURE_CONTENT=true \
   openclaw gateway start
 ```
 
-Or via systemd:
+#### Granular (recommended)
+
+Capture only specific categories — e.g., tool I/O for debugging without recording user prompts:
+
+```bash
+OPENCLAW_OTEL_CONTENT_POLICY='{"toolInputs":true,"toolOutputs":true}' \
+  NODE_OPTIONS="--import /path/to/openclaw-observability-plugin/instrumentation/preload.mjs" \
+  openclaw gateway start
+```
+
+Via systemd:
 
 ```ini
 [Service]
-Environment=OPENCLAW_OTEL_CAPTURE_CONTENT=true
+Environment=OPENCLAW_OTEL_CONTENT_POLICY={"toolInputs":true,"toolOutputs":true}
 Environment=NODE_OPTIONS=--import /path/to/openclaw-observability-plugin/instrumentation/preload.mjs
 ExecStart=/usr/bin/openclaw gateway start
 ```
@@ -66,7 +102,10 @@ Plugin config for parity (so the `otel_status` tool and the mismatch warning agr
       "otel-observability": {
         "enabled": true,
         "config": {
-          "captureContent": true
+          "captureContent": {
+            "toolInputs": true,
+            "toolOutputs": true
+          }
         }
       }
     }
@@ -74,11 +113,9 @@ Plugin config for parity (so the `otel_status` tool and the mismatch warning agr
 }
 ```
 
-The env-var value must be the exact string `true`. Anything else — `1`, `yes`, `True`, unset — resolves to `false`. The strict match exists to keep the privacy default unambiguous.
-
 ## When to enable content capture
 
-Enabling `captureContent` is a deliberate tradeoff. Useful when:
+Enabling any `captureContent` flag is a deliberate tradeoff. The granular policy lets you trade off per-category instead of all-or-nothing: for example, enabling only `toolInputs`/`toolOutputs` records tool-call I/O for debugging while leaving user prompts and assistant replies out of spans. Useful when:
 
 - You are debugging prompt engineering and need to see actual prompt/completion pairs alongside token counts.
 - You operate the OTLP backend and downstream storage yourself.
@@ -92,14 +129,14 @@ Avoid enabling content capture when:
 
 ## Sensitive data reaching spans
 
-When `captureContent: true`, any of the following can land in span storage:
+Whenever a flag is `true`, the following can land in span storage:
 
-- User chat input, including PII, credentials, or proprietary data.
-- Document contents summarized into prompts.
-- Tool outputs fed back to the model (e.g., file contents from `tool.Read`).
-- System prompts, which may encode prompt-engineering IP you don't want to expose.
+- `inputMessages` / `systemPrompt`: user chat input (including PII, credentials, proprietary data), document contents summarized into prompts, system prompts that may encode prompt-engineering IP.
+- `outputMessages`: assistant replies, which can mirror or reveal sensitive input data.
+- `toolInputs`: tool-call arguments — file paths, command lines, query strings, API request bodies. Note that even with `toolInputs: false`, the smaller `openclaw.tool.input_preview` attribute is still emitted.
+- `toolOutputs`: tool-call results fed back to the model — file contents from `tool.Read`, shell command output, database query results.
 
-The plugin does **not** scrub Traceloop span attributes before export. If you need redaction, apply it at the OTel Collector (`transform` / `attributes` processors) or at the backend.
+The plugin does **not** scrub Traceloop or `openclaw.content.*` span attributes before export. If you need redaction, apply it at the OTel Collector (`transform` / `attributes` processors) or at the backend.
 
 ## Complementary detections
 
