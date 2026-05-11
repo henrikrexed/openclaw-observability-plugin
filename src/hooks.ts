@@ -92,6 +92,7 @@ import {
   OC_CRON_DURATION_MS,
   OC_CRON_SUCCESS,
   OC_CRON_AGENT_ID,
+  ATTR_USER_ID,
 } from "./semconv.js";
 
 const CODE_NS = "openclaw.otel.hooks";
@@ -350,7 +351,14 @@ export function registerHooks(
             [GEN_AI_AGENT_NAME]: agentId,
             "openclaw.session.key": sessionKey,
             "openclaw.session.channel": channel,
+            // ISI-995: mirror the openclaw-namespaced user id to the
+            // OTel-stable `user.id` so consumers outside the openclaw
+            // namespace (registry-keyed dashboards, GenAI cross-vendor
+            // tools) can correlate sessions on a standard key. Keep
+            // `openclaw.session.user_id` for backwards compatibility —
+            // this is dual-emit, not a rename.
             "openclaw.session.user_id": userId,
+            [ATTR_USER_ID]: userId,
             "openclaw.agent.id": agentId,
             ...codeAttrs("session_start"),
           },

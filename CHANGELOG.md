@@ -40,6 +40,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Added
 
+- **Resource identity hygiene (ISI-995).** The trace, metric, and log
+  Resources now emit a real `service.version` resolved from
+  `openclaw.plugin.json` (replacing the legacy hard-coded `"0.1.0"`
+  placeholder so version-comparison dashboards see actual plugin
+  releases) and an OTel semconv `schema_url` pinned to the installed
+  `@opentelemetry/semantic-conventions` version (currently
+  `https://opentelemetry.io/schemas/1.39.0`). The instrumentation-scope
+  version on every span / metric / LogRecord now matches the plugin
+  version too. Plugin version lives in a new `src/version.ts` module.
+- **`user.id` mirror on `openclaw.session` span (ISI-995).** The stable
+  OTel general attribute `user.id` is dual-emitted alongside the
+  existing `openclaw.session.user_id` so registry-keyed dashboards can
+  correlate sessions on a standard attribute. `openclaw.session.user_id`
+  is retained for backwards compatibility — this is a dual-emit, not a
+  rename.
+- **Log-attribute dedup (ISI-995).** OTLP log records now emit
+  OTel-stable `code.function.name`, `code.file.path`, and
+  `code.line.number` for the emit site, replacing the older
+  `openclaw.log.function`, `openclaw.log.file`, and `openclaw.log.line`
+  triplet (which duplicated the same semantics in a non-portable
+  namespace and confused log-pipeline filters keyed on `code.*`). The
+  pipeline no longer emits `openclaw.log.trace_id`, `openclaw.log.span_id`,
+  or `openclaw.log.trace_flags` either — those fields are already on the
+  OTLP LogRecord via the active context the pipeline forwards into
+  `emit()`, so the duplicate attribute lines were silent double-records.
 - **OTel GenAI / code semconv 2026-04 alignment — dual-emit window (ISI-994).**
   Schema version bumped to `1.2.0` (resource attribute
   `openclaw.schema.version`). Spans and metrics that previously emitted

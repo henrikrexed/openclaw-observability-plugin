@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   bridgeGatewayLogger,
+  buildLogAttributes,
   initLogPipeline,
   parseLogConfig,
   shouldExclude,
@@ -462,5 +463,95 @@ describe("bridgeGatewayLogger (ISI-997)", () => {
     // The original method (a spy) is invoked, but emit is not.
     expect(emit).toHaveBeenCalledTimes(2);
     expect(original).toHaveBeenCalledWith("post-restore");
+  });
+});
+
+// ─── ISI-995: log-attribute dedup ──────────────────────────────────────────
+
+describe("buildLogAttributes (ISI-995 log-attribute dedup)", () => {
+  it("emits OTel-stable code.function.name / code.file.path / code.line.number for the emit site", () => {
+    const attrs = buildLogAttributes({
+      level: "info",
+      message: "hello",
+      logger: "openclaw-gateway",
+      function: "handleRequest",
+      file: "src/server.ts",
+      line: 142,
+      timestamp: Date.now(),
+    });
+
+    expect(attrs["code.function.name"]).toBe("handleRequest");
+    expect(attrs["code.file.path"]).toBe("src/server.ts");
+    expect(attrs["code.line.number"]).toBe(142);
+  });
+
+  it("does NOT emit the legacy openclaw.log.function / file / line attributes", () => {
+    const attrs = buildLogAttributes({
+      level: "info",
+      message: "hello",
+      function: "handleRequest",
+      file: "src/server.ts",
+      line: 142,
+    });
+
+    // These three keys must be absent — they were dropped in ISI-995 in
+    // favour of the OTel-stable code.* keys. Pinning the dedup contract
+    // here so a future drift surfaces in tests, not in dashboard land.
+    expect(attrs).not.toHaveProperty("openclaw.log.function");
+    expect(attrs).not.toHaveProperty("openclaw.log.file");
+    expect(attrs).not.toHaveProperty("openclaw.log.line");
+  });
+
+  it("does NOT emit duplicate trace_id / span_id / trace_flags attributes (the LogRecord carries them via context)", () => {
+    // Even when an event happens to carry trace_id-like keys, we don't
+    // surface them as openclaw.log.trace_id / span_id / trace_flags —
+    // the OTLP LogRecord ships those from the active context the
+    // pipeline forwards into emit(), so duplicating them was both
+    // redundant and confusing for log-pipeline filters.
+    const attrs = buildLogAttributes({
+      level: "info",
+      message: "hello",
+    });
+
+    expect(attrs).not.toHaveProperty("openclaw.log.trace_id");
+    expect(attrs).not.toHaveProperty("openclaw.log.span_id");
+    expect(attrs).not.toHaveProperty("openclaw.log.trace_flags");
+  });
+
+  it("still emits the openclaw-namespaced logger / type / session.key / agent.id keys", () => {
+    const attrs = buildLogAttributes({
+      level: "info",
+      message: "hello",
+      logger: "openclaw-gateway",
+      type: "log.record",
+      sessionKey: "sess-1",
+      agentId: "agent-7",
+    });
+
+    expect(attrs["openclaw.log.logger"]).toBe("openclaw-gateway");
+    expect(attrs["openclaw.log.type"]).toBe("log.record");
+    expect(attrs["openclaw.session.key"]).toBe("sess-1");
+    expect(attrs["openclaw.agent.id"]).toBe("agent-7");
+  });
+
+  it("falls back to the sessionKey argument when the event omits it", () => {
+    const attrs = buildLogAttributes(
+      { level: "info", message: "hello" },
+      "sess-from-arg",
+    );
+    expect(attrs["openclaw.session.key"]).toBe("sess-from-arg");
+  });
+
+  it("packs unknown fields under openclaw.log.extra.<key> with redaction", () => {
+    const attrs = buildLogAttributes({
+      level: "info",
+      message: "hello",
+      requestId: "abc-123",
+      apiKey: "sk-abcdefghijklmnopqrstuv",
+    });
+    expect(attrs["openclaw.log.extra.requestId"]).toBe("abc-123");
+    // toAnyValue redacts strings, so the secret-shaped value should not
+    // round-trip in cleartext through the extras bucket.
+    expect(attrs["openclaw.log.extra.apiKey"]).toBe("[REDACTED_API_KEY]");
   });
 });

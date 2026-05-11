@@ -1239,6 +1239,10 @@ describe("session_start / session_end hooks (ISI-928)", () => {
     expect(sessionSpan!.attrs["openclaw.session.user_id"]).toBe("user-42");
     expect(sessionSpan!.attrs["code.function.name"]).toBe("openclaw.otel.hooks.session_start");
     expect(sessionSpan!.attrs["code.function"]).toBeUndefined();
+    // ISI-995: stable `user.id` mirrors the openclaw-namespaced user id so
+    // registry-keyed dashboards can correlate sessions without coupling
+    // to the openclaw.* namespace.
+    expect(sessionSpan!.attrs["user.id"]).toBe("user-42");
     expect(sessionSpan!.ended).toBe(false);
 
     expect(telemetry.gauges.activeSessions.add).toHaveBeenCalledWith(1, expect.any(Object));

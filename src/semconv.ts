@@ -62,6 +62,29 @@ export const ERROR_TYPE = "error.type";
 export const CODE_FUNCTION_NAME = "code.function.name";
 /** Stable: repo-relative source file path of the emit site. */
 export const CODE_FILE_PATH = "code.file.path";
+/** Stable: line number within {@link CODE_FILE_PATH} of the emit site. */
+export const CODE_LINE_NUMBER = "code.line.number";
+
+// ── General attribute keys ──────────────────────────────────────────
+/**
+ * Stable general OTel attribute for the end-user id (`user.id`). Plugin
+ * code mirrors this from {@link OC_SESSION_KEY}'s user id so consumers
+ * outside the openclaw namespace can correlate sessions on a registry
+ * key, while the `openclaw.session.user_id` legacy key keeps existing
+ * dashboards working.
+ */
+export const ATTR_USER_ID = "user.id";
+
+/**
+ * OpenTelemetry semantic-conventions schema URL emitted on the plugin's
+ * Resource (ISI-995). Pinned to the version of
+ * `@opentelemetry/semantic-conventions` declared in `package.json`.
+ *
+ * When upgrading the semconv dependency, bump this constant in lockstep
+ * — the schema URL on the Resource is what tells downstream backends
+ * which generation of OTel attribute names this plugin emits.
+ */
+export const OTEL_SCHEMA_URL = "https://opentelemetry.io/schemas/1.39.0";
 
 // ── Plugin-domain (legacy) attribute keys ───────────────────────────
 export const OC_AGENT_ID = "openclaw.agent.id";
