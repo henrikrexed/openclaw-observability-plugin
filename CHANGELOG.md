@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Added
+
+- **Configurable trace sampling rate (ISI-998).** New `sampleRate` option
+  (0.0–1.0) in `diagnostics.otel`. When set, the plugin wires a
+  `ParentBasedSampler` around a `TraceIdRatioBasedSampler` so root spans
+  make a deterministic, trace-id-based sampling decision and child spans
+  inherit it — keeping distributed traces coherent under head-based
+  sampling. Invalid values (out of range, `NaN`, non-numeric) are ignored
+  and the SDK default (`parentbased_always_on`) is used. Documented in
+  `docs/configuration.md#trace-sampling`.
+
 ### Changed
 
 - **OpenClaw attribute schema bumped to `1.1.0` (ISI-993).** Three call sites

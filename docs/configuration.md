@@ -50,7 +50,7 @@ OpenTelemetry export configuration.
 | `traces` | boolean | `true` | Enable trace export |
 | `metrics` | boolean | `true` | Enable metrics export |
 | `logs` | boolean | `false` | Enable log forwarding |
-| `sampleRate` | number | `1.0` | Trace sampling rate (0.0–1.0) |
+| `sampleRate` | number | — | Trace sampling rate, `0.0`–`1.0`. Omit to use the SDK default (`parentbased_always_on`). See [Trace Sampling](#trace-sampling). |
 | `flushIntervalMs` | number | — | Export flush interval in milliseconds |
 
 ## Endpoint Configuration
@@ -235,6 +235,31 @@ OpenClaw also respects standard OTel environment variables as fallbacks:
 | `OPENCLAW_OTEL_CAPTURE_CONTENT` | `true` to capture LLM prompt/completion text in Traceloop spans. See [captureContent (gateway-launch setting)](#capturecontent-gateway-launch-setting). |
 
 Config file values take precedence over environment variables.
+
+## Trace Sampling
+
+The plugin exports 100% of traces by default. For high-traffic gateways this can be tuned down with the `sampleRate` option (0.0–1.0):
+
+```json
+{
+  "diagnostics": {
+    "otel": {
+      "sampleRate": 0.1
+    }
+  }
+}
+```
+
+Semantics:
+
+- `sampleRate` omitted — the SDK default sampler (`parentbased_always_on`) is used. The plugin does not construct its own sampler; nothing sampler-related appears in the boot log.
+- `sampleRate: 1.0` — the plugin explicitly constructs `ParentBased(TraceIdRatio(1.0))`. Behaviourally equivalent to always-on, but the boot log reports `sampler=parentbased_traceidratio(1)` so operators can confirm the plugin took the sampling code path.
+- `0.0` — drop every trace.
+- Any value in between — keep that fraction of root traces.
+
+Sampling is head-based and parent-respecting: the plugin wires a `ParentBasedSampler` around a `TraceIdRatioBasedSampler`. The root span of a trace makes the sampling decision based on the trace ID; child spans inherit the parent's decision so distributed traces stay coherent and you never see "half a trace".
+
+Invalid values (negative, > 1, `NaN`, non-numeric) are ignored and the SDK default (`parentbased_always_on`) is used instead.
 
 ## `captureContent` (gateway-launch setting)
 
