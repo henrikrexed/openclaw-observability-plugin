@@ -23,6 +23,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - New env var `OPENCLAW_OTEL_CONTENT_POLICY` (JSON) bridges the policy to
   the ESM preload. Takes precedence over the legacy
   `OPENCLAW_OTEL_CAPTURE_CONTENT` when both are set.
+- **Configurable trace sampling rate (ISI-998).** New `sampleRate` option
+  (0.0–1.0) in `diagnostics.otel`. When set, the plugin wires a
+  `ParentBasedSampler` around a `TraceIdRatioBasedSampler` so root spans
+  make a deterministic, trace-id-based sampling decision and child spans
+  inherit it — keeping distributed traces coherent under head-based
+  sampling. Invalid values (out of range, `NaN`, non-numeric) are ignored
+  and the SDK default (`parentbased_always_on`) is used. Documented in
+  `docs/configuration.md#trace-sampling`.
 
 ### Changed
 
