@@ -232,7 +232,8 @@ OpenClaw also respects standard OTel environment variables as fallbacks:
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Default OTLP endpoint |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | Default protocol |
 | `OTEL_SERVICE_NAME` | Default service name |
-| `OPENCLAW_OTEL_CAPTURE_CONTENT` | `true` to capture LLM prompt/completion text in Traceloop spans. See [captureContent (gateway-launch setting)](#capturecontent-gateway-launch-setting). |
+| `OPENCLAW_OTEL_CAPTURE_CONTENT` | Legacy single-boolean flag for Traceloop content capture. `true` enables prompt/completion text on LLM-client spans. See [captureContent (gateway-launch setting)](#capturecontent-gateway-launch-setting). |
+| `OPENCLAW_OTEL_CONTENT_POLICY` | Granular policy JSON (ISI-1000). When set, takes precedence over the legacy boolean. Same shape as the plugin's `captureContent` object form. |
 
 Config file values take precedence over environment variables.
 
@@ -263,9 +264,24 @@ Invalid values (negative, > 1, `NaN`, non-numeric) are ignored and the SDK defau
 
 ## `captureContent` (gateway-launch setting)
 
-The custom plugin exposes a `captureContent` boolean in `plugins.entries.otel-observability.config`. When `true`, Traceloop-instrumented LLM-client spans (`@traceloop/instrumentation-anthropic`, `@traceloop/instrumentation-openai`) include the actual prompt/completion text as `gen_ai.prompt.*` and `gen_ai.completion.*` attributes.
+The plugin exposes a `captureContent` field in `plugins.entries.otel-observability.config`. It accepts either:
 
-**Default: `false` (privacy-first).** The schema help text already advertises this toggle; see [github issue #15](https://github.com/henrikrexed/openclaw-observability-plugin/issues/15) for the motivating report.
+- a single boolean — `true` turns every capture category on, `false` turns every category off (legacy shape, kept for backwards compatibility), or
+- a granular **`ContentCapturePolicy`** object with five independent flags:
+
+| Flag | Span attribute(s) | What is captured |
+|------|--------------------|-------------------|
+| `inputMessages` | `openclaw.content.input_message` (request span), `openclaw.content.prompt` / `openclaw.content.messages` (agent.turn span) | Inbound user message + the prompt and message history fed to the LLM |
+| `outputMessages` | `openclaw.content.output_message` (message.sent span) | Outbound assistant reply text |
+| `toolInputs` | `openclaw.content.tool_input` (execute_tool span) | Full tool-call input arguments (JSON-stringified, capped at 8192 UTF-16 code units) |
+| `toolOutputs` | `openclaw.content.tool_output` (execute_tool span) | Tool-call result text (text parts of the result message, capped at 8192 UTF-16 code units) |
+| `systemPrompt` | `openclaw.content.system_prompt` (agent.turn span) | System prompt text |
+
+LLM-client spans emitted by Traceloop (`@traceloop/instrumentation-anthropic`, `@traceloop/instrumentation-openai`) still respect the legacy single-boolean Traceloop flag. The plugin derives it from the policy as `inputMessages || outputMessages || systemPrompt` — the three categories that map to prompt/completion text.
+
+> ⚠️ **Direction selection only applies to the plugin's own spans.** Traceloop's `traceContent` is a single boolean with no input/output distinction, so enabling **any** of `inputMessages`, `outputMessages`, or `systemPrompt` causes Traceloop LLM-client spans to record **both** `gen_ai.prompt.*.content` and `gen_ai.completion.*.content`. The `openclaw.content.*` attributes on the plugin's hook-surface spans **do** honor each flag in isolation — e.g., `{ inputMessages: true }` will record `openclaw.content.input_message` but not `openclaw.content.output_message`. If you need strict one-direction capture without completions landing on LLM-client spans, leave every LLM-content flag off and capture from the hook surface only (or filter `gen_ai.completion.*.content` at the OTel Collector). See [Privacy: `captureContent`](./security/privacy.md#traceloop-llm-client-spans-via-the-preload).
+
+**Default: `false` (every flag off, privacy-first).** See [github issue #15](https://github.com/henrikrexed/openclaw-observability-plugin/issues/15) for the motivating report and ISI-1000 for the granular policy.
 
 ### Not hot-reloadable
 
@@ -273,24 +289,18 @@ The custom plugin exposes a `captureContent` boolean in `plugins.entries.otel-ob
 
 ### How to enable content capture
 
-Set both the plugin config **and** the environment variable before launching the gateway:
+The preload reads two env vars and picks the granular one whenever it is set:
+
+- `OPENCLAW_OTEL_CONTENT_POLICY` — granular policy as JSON. Preferred.
+- `OPENCLAW_OTEL_CAPTURE_CONTENT` — legacy single boolean. Fallback.
+
+#### All-on (legacy boolean)
 
 ```bash
 OPENCLAW_OTEL_CAPTURE_CONTENT=true \
   NODE_OPTIONS="--import /path/to/openclaw-observability-plugin/instrumentation/preload.mjs" \
   openclaw gateway start
 ```
-
-Or via systemd:
-
-```ini
-[Service]
-Environment=OPENCLAW_OTEL_CAPTURE_CONTENT=true
-Environment=NODE_OPTIONS=--import /path/to/openclaw-observability-plugin/instrumentation/preload.mjs
-ExecStart=/usr/bin/openclaw gateway start
-```
-
-Plugin config:
 
 ```json
 {
@@ -307,18 +317,56 @@ Plugin config:
 }
 ```
 
+#### Granular (recommended)
+
+Enable only what you actually need. For example, capture tool inputs/outputs for debugging without recording user prompts:
+
+```bash
+OPENCLAW_OTEL_CONTENT_POLICY='{"toolInputs":true,"toolOutputs":true}' \
+  NODE_OPTIONS="--import /path/to/openclaw-observability-plugin/instrumentation/preload.mjs" \
+  openclaw gateway start
+```
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "config": {
+          "captureContent": {
+            "toolInputs": true,
+            "toolOutputs": true
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Or via systemd:
+
+```ini
+[Service]
+Environment=OPENCLAW_OTEL_CONTENT_POLICY={"toolInputs":true,"toolOutputs":true}
+Environment=NODE_OPTIONS=--import /path/to/openclaw-observability-plugin/instrumentation/preload.mjs
+ExecStart=/usr/bin/openclaw gateway start
+```
+
 ### Mismatch warning
 
-If the plugin config says `captureContent: true` but the env var was unset (or `false`) when the gateway launched, the preload will have wired the Traceloop instrumentations with `traceContent: false`. At plugin `start()` the plugin logs a warning like:
+If the plugin config and the preload-time env vars disagree about whether LLM-client content capture is on, the plugin logs a warning at `start()`:
 
 ```
-[otel] captureContent=true in plugin config but the preload resolved
+[otel] captureContent policy resolves traceContent=true but the preload resolved
 OPENCLAW_OTEL_CAPTURE_CONTENT=false at gateway launch. Traceloop LLM-client
-spans will use the preload's value. Set OPENCLAW_OTEL_CAPTURE_CONTENT=true
-in the gateway's environment before starting (see docs/security/privacy.md).
+spans will use the preload's value. Set OPENCLAW_OTEL_CONTENT_POLICY='{"inputMessages":true}'
+(or OPENCLAW_OTEL_CAPTURE_CONTENT=true) in the gateway's environment before
+starting (see docs/security/privacy.md).
 ```
 
-Fix by setting the env var and restarting the gateway.
+Fix by setting the env var and restarting the gateway. The plugin's own hook-surface content attributes (`openclaw.content.*`) are not affected by this warning — they are evaluated against the live plugin config and so are always consistent with the running policy.
 
 ### Privacy guidance
 

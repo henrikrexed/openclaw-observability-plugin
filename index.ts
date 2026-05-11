@@ -29,7 +29,7 @@
  *   }
  */
 
-import { parseConfig, type OtelObservabilityConfig } from "./src/config.js";
+import { parseConfig, policyEnablesLlmContent, type OtelObservabilityConfig } from "./src/config.js";
 import { initTelemetry, hasPreloadedOtelSdk, type TelemetryRuntime } from "./src/telemetry.js";
 import { initOpenLLMetry } from "./src/openllmetry.js";
 import { registerHooks } from "./src/hooks.js";
@@ -140,7 +140,16 @@ const otelObservabilityPlugin = {
             console.log(`  Traces:          ${config.traces ? "✅" : "❌"}`);
             console.log(`  Metrics:         ${config.metrics ? "✅" : "❌"}`);
             console.log(`  Logs:            ${config.logs ? "✅" : "❌"}`);
-            console.log(`  Capture content: ${config.captureContent ? "✅" : "❌"}`);
+            const policy = config.captureContent;
+            const onFlags = (Object.keys(policy) as Array<keyof typeof policy>)
+              .filter((k) => policy[k]);
+            const capContentStr =
+              onFlags.length === 0
+                ? "❌ none"
+                : onFlags.length === Object.keys(policy).length
+                  ? "✅ all"
+                  : `⚠️ ${onFlags.join(", ")}`;
+            console.log(`  Capture content: ${capContentStr}`);
             console.log(`  Initialized:     ${telemetry ? "✅" : "❌"}`);
             console.log(`  Cost tracking:   ${hasDiagnosticsSupport() ? "✅ (via diagnostics API)" : "❌"}`);
 
@@ -161,22 +170,45 @@ const otelObservabilityPlugin = {
         // they work in both gateway and embedded runner contexts. Only
         // gateway-specific work lives here.
 
-        // Bridge captureContent → OPENCLAW_OTEL_CAPTURE_CONTENT env var.
-        // The preload reads this env at gateway launch, but any subprocess
-        // spawned later inherits it from here too. If the preload was
+        // Bridge captureContent → env vars consumed by the preload.
+        // The preload reads these at gateway launch, but any subprocess
+        // spawned later inherits them from here too. If the preload was
         // already active with a mismatched value, LLM-client spans will
         // reflect the preload's value (not the plugin config) — warn so
-        // operators know to set the env var before launching the gateway.
+        // operators know to set the env vars before launching the gateway.
+        //
+        // Two vars are published:
+        //   - OPENCLAW_OTEL_CONTENT_POLICY: full granular policy as JSON
+        //     (ISI-1000). The preload reads this with precedence.
+        //   - OPENCLAW_OTEL_CAPTURE_CONTENT: legacy single boolean
+        //     (`inputMessages || outputMessages || systemPrompt`), kept
+        //     for older preloads and external subprocesses that still
+        //     read the legacy flag.
+        //
+        // Precedence (subprocesses): these assignments **always
+        // overwrite** whatever the gateway was launched with. A
+        // subprocess spawned by gateway code (e.g. a child OpenClaw
+        // runner) therefore inherits the plugin's resolved policy, not
+        // whatever the operator originally set in the gateway's
+        // environment. This is intentional — plugin config is the
+        // authority for in-process behavior; the env vars exist only to
+        // brief the preload that ran before plugin config was parsed.
+        // If you need a subprocess to see a different value, set it
+        // explicitly in that subprocess's spawn-time env, not in the
+        // gateway's.
+        const llmContentEnabled = policyEnablesLlmContent(config.captureContent);
+        const policyJson = JSON.stringify(config.captureContent);
         const preloadActive = hasPreloadedOtelSdk();
         const preloadResolved = (globalThis as any).__OPENCLAW_OTEL_CAPTURE_CONTENT;
-        if (preloadActive && preloadResolved !== config.captureContent) {
+        if (preloadActive && preloadResolved !== llmContentEnabled) {
           logger.warn(
-            `[otel] captureContent=${config.captureContent} in plugin config but the preload resolved OPENCLAW_OTEL_CAPTURE_CONTENT=${preloadResolved} at gateway launch. ` +
+            `[otel] captureContent policy resolves traceContent=${llmContentEnabled} but the preload resolved OPENCLAW_OTEL_CAPTURE_CONTENT=${preloadResolved} at gateway launch. ` +
               `Traceloop LLM-client spans will use the preload's value. ` +
-              `Set OPENCLAW_OTEL_CAPTURE_CONTENT=${config.captureContent} in the gateway's environment before starting (see docs/security/privacy.md).`
+              `Set OPENCLAW_OTEL_CONTENT_POLICY='${policyJson}' (or OPENCLAW_OTEL_CAPTURE_CONTENT=${llmContentEnabled}) in the gateway's environment before starting (see docs/security/privacy.md).`
           );
         }
-        process.env.OPENCLAW_OTEL_CAPTURE_CONTENT = String(config.captureContent);
+        process.env.OPENCLAW_OTEL_CAPTURE_CONTENT = String(llmContentEnabled);
+        process.env.OPENCLAW_OTEL_CONTENT_POLICY = policyJson;
 
         // 1. Wrap LLM SDKs. The wraps use trace.getTracer() which goes
         //    through the provider we registered above. OpenLLMetry's

@@ -13,7 +13,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Counter, Histogram, Span, Tracer, UpDownCounter } from "@opentelemetry/api";
 
 import { registerHooks } from "../src/hooks.js";
-import type { OtelObservabilityConfig } from "../src/config.js";
+import {
+  CONTENT_POLICY_DISABLED,
+  CONTENT_POLICY_ENABLED,
+  type OtelObservabilityConfig,
+} from "../src/config.js";
 import type { TelemetryRuntime } from "../src/telemetry.js";
 
 // ── Test doubles ────────────────────────────────────────────────────
@@ -185,10 +189,19 @@ const config: OtelObservabilityConfig = {
   traces: true,
   metrics: true,
   logs: false,
-  captureContent: false,
+  captureContent: { ...CONTENT_POLICY_DISABLED },
   metricsIntervalMs: 30_000,
   resourceAttributes: {},
 };
+
+function configWithPolicy(
+  overrides: Partial<typeof CONTENT_POLICY_DISABLED> = {},
+): OtelObservabilityConfig {
+  return {
+    ...config,
+    captureContent: { ...CONTENT_POLICY_DISABLED, ...overrides },
+  };
+}
 
 // ── Tests ───────────────────────────────────────────────────────────
 
@@ -2152,3 +2165,348 @@ describe("cron_changed / cron_executed hooks (ISI-929)", () => {
     });
   });
 });
+
+// ── ContentCapturePolicy gating (ISI-1000) ──────────────────────────
+
+describe("content capture policy gating (ISI-1000)", () => {
+  let stopHooks: () => void;
+
+  it("emits no openclaw.content.* attributes when policy is all-off", async () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const received = typedHooks.get("message_received")!;
+    await Promise.resolve(
+      received(
+        { channel: "cli", sessionKey: "s1", from: "user", text: "secret prompt" },
+        { sessionKey: "s1" },
+      ),
+    );
+
+    typedHooks.get("before_model_resolve")!(
+      {},
+      { agentId: "a1", sessionKey: "s1" },
+    );
+    typedHooks.get("before_prompt_build")!(
+      {
+        prompt: "user content",
+        messages: [{ role: "user", content: "x" }],
+        systemPrompt: "be helpful",
+      },
+      { agentId: "a1", sessionKey: "s1" },
+    );
+    typedHooks.get("message_sent")!(
+      { sessionKey: "s1", channel: "cli", to: "user", text: "reply text" },
+      { sessionKey: "s1" },
+    );
+
+    for (const span of spans) {
+      for (const key of Object.keys(span.attrs)) {
+        expect(
+          key.startsWith("openclaw.content."),
+          `unexpected content attribute "${key}" with policy=all-off`,
+        ).toBe(false);
+      }
+    }
+
+    stopHooks();
+  });
+
+  it("inputMessages=true captures inbound user text + prompt + messages", async () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ inputMessages: true }),
+    );
+
+    await Promise.resolve(
+      typedHooks.get("message_received")!(
+        { channel: "cli", sessionKey: "s1", from: "user", text: "hello" },
+        { sessionKey: "s1" },
+      ),
+    );
+    typedHooks.get("before_model_resolve")!(
+      {},
+      { agentId: "a1", sessionKey: "s1" },
+    );
+    typedHooks.get("before_prompt_build")!(
+      {
+        prompt: "hello prompt",
+        messages: [{ role: "user", content: "hi" }],
+      },
+      { agentId: "a1", sessionKey: "s1" },
+    );
+
+    const request = spans.find((s) => s.spanName === "openclaw.request");
+    const turn = spans.find((s) => s.spanName === "openclaw.agent.turn");
+    expect(request!.attrs["openclaw.content.input_message"]).toBe("hello");
+    expect(turn!.attrs["openclaw.content.prompt"]).toBe("hello prompt");
+    expect(turn!.attrs["openclaw.content.messages"]).toEqual(
+      JSON.stringify([{ role: "user", content: "hi" }]),
+    );
+    // systemPrompt is gated separately
+    expect(turn!.attrs["openclaw.content.system_prompt"]).toBeUndefined();
+
+    stopHooks();
+  });
+
+  it("systemPrompt=true is independent of inputMessages", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ systemPrompt: true }),
+    );
+
+    typedHooks.get("before_model_resolve")!(
+      {},
+      { agentId: "a1", sessionKey: "s1" },
+    );
+    typedHooks.get("before_prompt_build")!(
+      {
+        prompt: "user-only",
+        messages: [{ role: "user", content: "x" }],
+        systemPrompt: "be helpful and safe",
+      },
+      { agentId: "a1", sessionKey: "s1" },
+    );
+
+    const turn = spans.find((s) => s.spanName === "openclaw.agent.turn");
+    expect(turn!.attrs["openclaw.content.system_prompt"]).toBe(
+      "be helpful and safe",
+    );
+    expect(turn!.attrs["openclaw.content.prompt"]).toBeUndefined();
+    expect(turn!.attrs["openclaw.content.messages"]).toBeUndefined();
+
+    stopHooks();
+  });
+
+  it("outputMessages=true captures outbound reply text on message.sent span", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ outputMessages: true }),
+    );
+
+    typedHooks.get("message_sent")!(
+      { sessionKey: "s1", channel: "cli", to: "user", text: "the reply" },
+      { sessionKey: "s1" },
+    );
+
+    const sent = spans.find((s) => s.spanName === "openclaw.message.sent");
+    expect(sent!.attrs["openclaw.content.output_message"]).toBe("the reply");
+
+    stopHooks();
+  });
+
+  it("toolInputs=true captures tool args; toolOutputs=true captures result text", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ toolInputs: true, toolOutputs: true }),
+    );
+
+    // Tools live under an active session — set up message_received first.
+    return Promise.resolve(
+      typedHooks.get("message_received")!(
+        { channel: "cli", sessionKey: "s1", from: "u" },
+        { sessionKey: "s1" },
+      ),
+    ).then(() => {
+      typedHooks.get("before_tool_call")!(
+        {
+          toolName: "Read",
+          toolCallId: "call-1",
+          input: { path: "/tmp/file.txt" },
+        },
+        { sessionKey: "s1", agentId: "a1" },
+      );
+      typedHooks.get("after_tool_call")!(
+        {
+          toolName: "Read",
+          toolCallId: "call-1",
+          sessionKey: "s1",
+          message: {
+            content: [{ type: "text", text: "hello world" }],
+          },
+        },
+        { sessionKey: "s1" },
+      );
+
+      const tool = spans.find((s) => s.spanName === "execute_tool Read");
+      expect(tool).toBeDefined();
+      expect(tool!.attrs["openclaw.content.tool_input"]).toBe(
+        JSON.stringify({ path: "/tmp/file.txt" }),
+      );
+      expect(tool!.attrs["openclaw.content.tool_output"]).toBe("hello world");
+
+      stopHooks();
+    });
+  });
+
+  it("truncates content captures longer than 8192 code units with an inline marker", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ outputMessages: true }),
+    );
+
+    const big = "x".repeat(10_000);
+    typedHooks.get("message_sent")!(
+      { sessionKey: "s1", channel: "cli", to: "user", text: big },
+      { sessionKey: "s1" },
+    );
+
+    const sent = spans.find((s) => s.spanName === "openclaw.message.sent");
+    const captured = sent!.attrs["openclaw.content.output_message"] as string;
+    expect(captured.length).toBeLessThanOrEqual(10_000);
+    expect(captured).toMatch(/^x{8192}…\(truncated, 1808 more chars\)$/);
+
+    stopHooks();
+  });
+
+  it("backs off one code unit when the truncation cut would split a UTF-16 surrogate pair", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ outputMessages: true }),
+    );
+
+    // 8191 ASCII chars + a non-BMP emoji (2 UTF-16 code units) + filler.
+    // A naïve `.slice(0, 8192)` would split the surrogate pair and leave
+    // a lone high surrogate as the last code unit, which is invalid
+    // UTF-16. The captureContentAttribute helper detects that and backs
+    // off by one code unit, so the prefix becomes exactly 8191 'x's.
+    const head = "x".repeat(8191);
+    const emoji = "😀"; // U+1F600 — encoded as two UTF-16 code units
+    const tail = "y".repeat(2_000);
+    const text = head + emoji + tail;
+    expect(text.length).toBe(8191 + 2 + 2_000);
+    expect(text.charCodeAt(8191)).toBeGreaterThanOrEqual(0xd800);
+    expect(text.charCodeAt(8191)).toBeLessThanOrEqual(0xdbff);
+
+    typedHooks.get("message_sent")!(
+      { sessionKey: "s1", channel: "cli", to: "user", text },
+      { sessionKey: "s1" },
+    );
+
+    const sent = spans.find((s) => s.spanName === "openclaw.message.sent");
+    const captured = sent!.attrs["openclaw.content.output_message"] as string;
+    // Prefix is 8191 'x's (one less than the 8192 cap), the surrogate
+    // pair is dropped, and the truncation marker reports the overflow
+    // relative to the actual cut point.
+    const overflow = text.length - 8191; // 2002 more code units
+    expect(captured).toMatch(
+      new RegExp(`^x{8191}…\\(truncated, ${overflow} more chars\\)$`),
+    );
+    // Verify the prefix is well-formed UTF-16 (no dangling high surrogate).
+    const lastCode = captured.charCodeAt(8191 - 1);
+    expect(lastCode < 0xd800 || lastCode > 0xdbff).toBe(true);
+
+    stopHooks();
+  });
+
+  it("captures nothing for null/undefined values even when the flag is on", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ ...CONTENT_POLICY_ENABLED }),
+    );
+
+    typedHooks.get("message_sent")!(
+      // text is missing
+      { sessionKey: "s1", channel: "cli", to: "user" },
+      { sessionKey: "s1" },
+    );
+
+    const sent = spans.find((s) => s.spanName === "openclaw.message.sent");
+    expect(sent!.attrs["openclaw.content.output_message"]).toBeUndefined();
+
+    stopHooks();
+  });
+
+  it("redacts secrets that straddle the truncation boundary (ISI-1000 M2)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ outputMessages: true }),
+    );
+
+    // Place a bearer token so the 8192-char cut falls INSIDE the token
+    // and leaves only 10 surviving chars — below the bearer regex's
+    // {16,} minimum. If captureContentAttribute truncates BEFORE it
+    // redacts, those 10 chars leak as plaintext. Redact-first scrubs
+    // the secret before truncation can split it.
+    const bearer = "abc123xyz0123456789DEFGHIJKL"; // 28 chars
+    // 8160 a's + "Authorization: Bearer " (22) = 8182. Bearer occupies
+    // positions 8182..8209; cut at 8192 strands chars 8182..8191 (10
+    // chars: "abc123xyz0") in the OLD truncate-first code path.
+    const head = "a".repeat(8160);
+    const text = `${head}Authorization: Bearer ${bearer} trailing-context-that-pushes-past-the-cap`;
+    expect(text.length).toBeGreaterThan(8192);
+
+    typedHooks.get("message_sent")!(
+      { sessionKey: "s1", channel: "cli", to: "user", text },
+      { sessionKey: "s1" },
+    );
+
+    const sent = spans.find((s) => s.spanName === "openclaw.message.sent");
+    const captured = sent!.attrs["openclaw.content.output_message"] as string;
+    // No portion of the raw bearer — full, 10-char tail, or 5-char head —
+    // must be present, even though the cut falls in the middle of it.
+    expect(captured).not.toContain(bearer);
+    expect(captured).not.toContain(bearer.slice(0, 10));
+    expect(captured).not.toContain(bearer.slice(0, 5));
+
+    stopHooks();
+  });
+
+  it("redacts bearer tokens and API keys in captured content (ISI-999 + ISI-1000)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ outputMessages: true }),
+    );
+
+    // Mix of secret patterns redactSensitiveText knows: a bearer token and
+    // an Anthropic-style API key. Both must be scrubbed before reaching the
+    // span attribute — captureContentAttribute MUST route through
+    // setRedactedAttribute so operators who turn on content capture cannot
+    // accidentally leak credentials embedded in tool/LLM output.
+    const bearer = "abc123xyz0123456789DEFGHIJKL";
+    const apiKey = "sk-ant-AAAABBBBCCCCDDDDEEEE";
+    const leaky = `reply with Authorization: Bearer ${bearer} and key ${apiKey}`;
+    typedHooks.get("message_sent")!(
+      { sessionKey: "s1", channel: "cli", to: "user", text: leaky },
+      { sessionKey: "s1" },
+    );
+
+    const sent = spans.find((s) => s.spanName === "openclaw.message.sent");
+    const captured = sent!.attrs["openclaw.content.output_message"] as string;
+    expect(captured).toContain("Bearer [REDACTED_TOKEN]");
+    expect(captured).toContain("[REDACTED_API_KEY]");
+    expect(captured).not.toContain(bearer);
+    expect(captured).not.toContain(apiKey);
+
+    stopHooks();
+  });
+});
+

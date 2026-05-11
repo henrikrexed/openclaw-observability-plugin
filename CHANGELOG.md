@@ -8,6 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Added
 
+- **Granular content capture policy (ISI-1000).** The `captureContent`
+  plugin option now accepts a `ContentCapturePolicy` object with five
+  per-category flags (`inputMessages`, `outputMessages`, `toolInputs`,
+  `toolOutputs`, `systemPrompt`) in addition to the legacy single boolean.
+  Each flag gates one or more `openclaw.content.*` span attributes (capped
+  at 8192 UTF-16 code units per value, with surrogate-pair-safe truncation).
+  The legacy boolean still works — `true` enables all five flags, `false`
+  disables them. Traceloop's `traceContent` is derived from
+  `inputMessages || outputMessages || systemPrompt`; because Traceloop has a
+  single boolean, enabling any one of those three causes its LLM-client spans
+  to record both prompt and completion content (see
+  [`docs/security/privacy.md`](./docs/security/privacy.md)).
+- New env var `OPENCLAW_OTEL_CONTENT_POLICY` (JSON) bridges the policy to
+  the ESM preload. Takes precedence over the legacy
+  `OPENCLAW_OTEL_CAPTURE_CONTENT` when both are set.
 - **Configurable trace sampling rate (ISI-998).** New `sampleRate` option
   (0.0–1.0) in `diagnostics.otel`. When set, the plugin wires a
   `ParentBasedSampler` around a `TraceIdRatioBasedSampler` so root spans
@@ -39,6 +54,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   strings after filtering, the attribute is omitted entirely. This prevents
   malformed upstream events from emitting non-spec data via the unchecked
   TypeScript cast that landed in the initial Story 1 fix.
+- **Boundary-straddle redaction leak in content capture (ISI-1000).**
+  `captureContentAttribute` and `setToolInputPreview` now redact BEFORE
+  truncating. The previous order let a secret straddling the 8192-char
+  (or 1000-char preview) cap get sliced below the redaction regex's
+  minimum-match length, leaving a plaintext token prefix in the captured
+  span attribute. Verified with a bearer-token regression test driving
+  the boundary.
+- **Synthetic tool span SECURITY warn log redaction (ISI-1000).** The
+  third `[otel] SECURITY: ...` warn callsite (the `tool_result_persist`
+  no-active-tool-span fallback) was missing the `redactSensitiveText`
+  wrap that the other two security warns already had. With ISI-997's
+  OTLP log bridge on `main`, that callsite could ship credentials
+  embedded in user-supplied paths/commands to the backend logs. All
+  three callsites now share the redacted shape.
 
 ### Breaking
 

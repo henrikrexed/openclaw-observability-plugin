@@ -32,7 +32,7 @@
     },
     "captureContent": {
       "label": "Capture Prompt/Completion Content",
-      "help": "When enabled, records actual prompt and completion text in spans. Disable for privacy."
+      "help": "Accepts `true` / `false` (legacy, all-on or all-off) or a granular ContentCapturePolicy object with the per-category flags `inputMessages`, `outputMessages`, `toolInputs`, `toolOutputs`, `systemPrompt`. Default is everything off."
     },
     "metricsIntervalMs": {
       "label": "Metrics Export Interval (ms)",
@@ -80,8 +80,21 @@
         "description": "Enable log export"
       },
       "captureContent": {
-        "type": "boolean",
-        "description": "Capture prompt/completion content in spans"
+        "description": "Content capture policy. `true`/`false` toggle every category at once; an object selects categories individually. Unknown keys are tolerated by the parser and ignored at runtime. See docs/security/privacy.md.",
+        "oneOf": [
+          { "type": "boolean" },
+          {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "inputMessages": { "type": "boolean", "description": "Capture inbound user message text on the request/agent.turn spans." },
+              "outputMessages": { "type": "boolean", "description": "Capture outbound assistant reply text on the message.sent span." },
+              "toolInputs": { "type": "boolean", "description": "Capture full tool-call input arguments on the execute_tool span." },
+              "toolOutputs": { "type": "boolean", "description": "Capture tool-call result text on the execute_tool span." },
+              "systemPrompt": { "type": "boolean", "description": "Capture the system prompt on the agent.turn span." }
+            }
+          }
+        ]
       },
       "metricsIntervalMs": {
         "type": "integer",

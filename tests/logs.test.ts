@@ -18,7 +18,7 @@ import {
   type LogEvent,
   type LogPipelineConfig,
 } from "../src/logs.js";
-import type { OtelObservabilityConfig } from "../src/config.js";
+import { CONTENT_POLICY_DISABLED, type OtelObservabilityConfig } from "../src/config.js";
 
 function createConfig(overrides: Partial<OtelObservabilityConfig> = {}): OtelObservabilityConfig {
   return {
@@ -29,7 +29,7 @@ function createConfig(overrides: Partial<OtelObservabilityConfig> = {}): OtelObs
     traces: true,
     metrics: true,
     logs: true,
-    captureContent: false,
+    captureContent: { ...CONTENT_POLICY_DISABLED },
     metricsIntervalMs: 30_000,
     resourceAttributes: {},
     ...overrides,
