@@ -2439,6 +2439,44 @@ describe("content capture policy gating (ISI-1000)", () => {
     stopHooks();
   });
 
+  it("redacts secrets that straddle the truncation boundary (ISI-1000 M2)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ outputMessages: true }),
+    );
+
+    // Place a bearer token so the 8192-char cut falls INSIDE the token
+    // and leaves only 10 surviving chars — below the bearer regex's
+    // {16,} minimum. If captureContentAttribute truncates BEFORE it
+    // redacts, those 10 chars leak as plaintext. Redact-first scrubs
+    // the secret before truncation can split it.
+    const bearer = "abc123xyz0123456789DEFGHIJKL"; // 28 chars
+    // 8160 a's + "Authorization: Bearer " (22) = 8182. Bearer occupies
+    // positions 8182..8209; cut at 8192 strands chars 8182..8191 (10
+    // chars: "abc123xyz0") in the OLD truncate-first code path.
+    const head = "a".repeat(8160);
+    const text = `${head}Authorization: Bearer ${bearer} trailing-context-that-pushes-past-the-cap`;
+    expect(text.length).toBeGreaterThan(8192);
+
+    typedHooks.get("message_sent")!(
+      { sessionKey: "s1", channel: "cli", to: "user", text },
+      { sessionKey: "s1" },
+    );
+
+    const sent = spans.find((s) => s.spanName === "openclaw.message.sent");
+    const captured = sent!.attrs["openclaw.content.output_message"] as string;
+    // No portion of the raw bearer — full, 10-char tail, or 5-char head —
+    // must be present, even though the cut falls in the middle of it.
+    expect(captured).not.toContain(bearer);
+    expect(captured).not.toContain(bearer.slice(0, 10));
+    expect(captured).not.toContain(bearer.slice(0, 5));
+
+    stopHooks();
+  });
+
   it("redacts bearer tokens and API keys in captured content (ISI-999 + ISI-1000)", () => {
     const { api, typedHooks } = createStubApi();
     const { telemetry, spans } = createTelemetry();

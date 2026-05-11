@@ -129,9 +129,14 @@ export function registerHooks(
 
   function setToolInputPreview(span: any, toolInput: any): void {
     if (toolInput && typeof toolInput === "object") {
-      const preview = JSON.stringify(toolInput).slice(0, 1000);
-      // Always route through setRedactedAttribute so this attribute key
-      // never bypasses redaction, even if the call site is copy-pasted.
+      // Redact BEFORE truncating: slicing at 1000 chars can split a secret
+      // below the redaction regex's minimum-match length, leaving a
+      // plaintext token prefix in the preview. Running redactSensitiveText
+      // on the full JSON first guarantees the cut point lands on already-
+      // sanitized text. setRedactedAttribute is idempotent, so routing
+      // through it preserves the funnel invariant.
+      const redacted = redactSensitiveText(JSON.stringify(toolInput));
+      const preview = redacted.slice(0, 1000);
       setRedactedAttribute(span, "openclaw.tool.input_preview", preview);
     }
   }
@@ -170,6 +175,16 @@ export function registerHooks(
       }
     }
     if (!text) return;
+    // Redact BEFORE truncating. If a secret straddles the truncation
+    // boundary, slicing first can cut the token below the redaction
+    // regex's minimum-match length, so setRedactedAttribute would no
+    // longer scrub it and a plaintext prefix would ship to OTLP.
+    // Redacting the full text first guarantees that anything still
+    // visible after truncation has already passed through the
+    // SENSITIVE_VALUE_PATTERNS pipeline. redactSensitiveText is
+    // idempotent, so the funnel through setRedactedAttribute below is
+    // preserved as defense-in-depth.
+    text = redactSensitiveText(text);
     if (text.length > CONTENT_MAX_CHARS) {
       // Slicing on a UTF-16 boundary can leave a lone high surrogate
       // (0xD800–0xDBFF) as the last code unit, which is not a valid
@@ -181,9 +196,8 @@ export function registerHooks(
       const overflow = text.length - cut;
       text = `${text.slice(0, cut)}…(truncated, ${overflow} more chars)`;
     }
-    // Route through setRedactedAttribute so user-supplied content cannot
-    // bypass the redaction pipeline established by ISI-999 (secrets,
-    // bearer tokens, emails are scrubbed before reaching OTLP).
+    // Route through setRedactedAttribute so this attribute key
+    // never bypasses redaction even if a future caller drifts.
     setRedactedAttribute(span, key, text);
   }
 
@@ -1330,7 +1344,7 @@ export function registerHooks(
           agentId
         );
         if (securityEvent) {
-          logger.warn?.(`[otel] SECURITY: ${securityEvent.detection} - ${securityEvent.description}`);
+          logger.warn?.(`[otel] SECURITY: ${securityEvent.detection} - ${redactSensitiveText(securityEvent.description)}`);
           setToolInputPreview(span, toolInput);
         }
 
