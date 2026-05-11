@@ -35,6 +35,19 @@ import { initOpenLLMetry } from "./src/openllmetry.js";
 import { registerHooks } from "./src/hooks.js";
 import { registerDiagnosticsListener, hasDiagnosticsSupport } from "./src/diagnostics.js";
 
+// ── Public re-exports ───────────────────────────────────────────────
+// W3C trace context propagation helpers. Available without the plugin
+// register lifecycle so user code (custom RPC, message queues,
+// sub-agent transports) can inject/extract `traceparent` directly.
+export {
+  injectTraceContext,
+  extractTraceContext,
+  getPropagator,
+  setupGlobalPropagator,
+  propagationFields,
+  type HeaderCarrier,
+} from "./src/propagation.js";
+
 const otelObservabilityPlugin = {
   id: "otel-observability",
   name: "OpenTelemetry Observability",

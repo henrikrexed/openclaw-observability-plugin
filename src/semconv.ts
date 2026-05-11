@@ -30,9 +30,6 @@ export const GEN_AI_AGENT_NAME = "gen_ai.agent.name";
 export const GEN_AI_TOOL_NAME = "gen_ai.tool.name";
 export const GEN_AI_TOOL_CALL_ID = "gen_ai.tool.call.id";
 export const GEN_AI_TOOL_TYPE = "gen_ai.tool.type";
-export const GEN_AI_TOOL_APPROVAL_REQUESTED = "gen_ai.tool.approval.requested";
-export const GEN_AI_TOOL_APPROVAL_RESOLUTION = "gen_ai.tool.approval.resolution";
-export const GEN_AI_TOOL_APPROVAL_DURATION_MS = "gen_ai.tool.approval.duration_ms";
 export const GEN_AI_USAGE_INPUT_TOKENS = "gen_ai.usage.input_tokens";
 export const GEN_AI_USAGE_OUTPUT_TOKENS = "gen_ai.usage.output_tokens";
 export const GEN_AI_USAGE_TOTAL_TOKENS = "gen_ai.usage.total_tokens";
@@ -81,6 +78,14 @@ export const OC_TOOL_IS_SYNTHETIC = "openclaw.tool.is_synthetic";
 export const OC_TOOL_RESULT_CHARS = "openclaw.tool.result_chars";
 export const OC_TOOL_RESULT_PARTS = "openclaw.tool.result_parts";
 export const OC_TOOL_INPUT_PREVIEW = "openclaw.tool.input_preview";
+/**
+ * Tool-approval attributes live in the plugin-domain namespace because the
+ * OTel `gen_ai.*` namespace is reserved for the registry. Renamed from the
+ * former `gen_ai.tool.approval.*` keys in schema 1.1.0 (breaking change).
+ */
+export const OPENCLAW_TOOL_APPROVAL_REQUESTED = "openclaw.tool.approval.requested";
+export const OPENCLAW_TOOL_APPROVAL_RESOLUTION = "openclaw.tool.approval.resolution";
+export const OPENCLAW_TOOL_APPROVAL_DURATION_MS = "openclaw.tool.approval.duration_ms";
 export const OC_MESSAGE_CHANNEL = "openclaw.message.channel";
 export const OC_MESSAGE_DIRECTION = "openclaw.message.direction";
 export const OC_MESSAGE_FROM = "openclaw.message.from";
@@ -110,7 +115,7 @@ export const OC_CRON_AGENT_ID = "openclaw.cron.agent_id";
  * Schema version for plugin-domain attributes. Bump when emitted
  * attribute keys or values change in a way that consumers need to know.
  */
-export const OPENCLAW_SCHEMA_VERSION = "1.0.0";
+export const OPENCLAW_SCHEMA_VERSION = "1.1.0";
 
 // ── Token type values ───────────────────────────────────────────────
 export const TOKEN_TYPE_INPUT = "input";

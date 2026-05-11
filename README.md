@@ -106,7 +106,7 @@ openclaw.request (root span)
 | Log Export Pipeline | OTLP log export via `log.record` diagnostic events with severity, filtering, trace correlation |
 | Security Detection | Prompt injection, dangerous command, sensitive file access detection on spans |
 | GenAI Semantic Conventions | Full stable `gen_ai.*` attributes alongside legacy `openclaw.*` for dashboard compat |
-| Tool Approval Tracking | `gen_ai.tool.approval.requested/resolution/duration_ms` attributes |
+| Tool Approval Tracking | `openclaw.tool.approval.requested/resolution/duration_ms` attributes (schema 1.1.0; renamed from `gen_ai.tool.approval.*`) |
 | Cron & Sub-Agent Monitoring | Spans and metrics for cron jobs and sub-agent orchestration |
 | Diagnostic Integration | Token/cost data from `model.usage` events enriches spans via `onDiagnosticEvent` |
 

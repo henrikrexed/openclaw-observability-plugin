@@ -21,6 +21,7 @@ import { OTLPMetricExporter as OTLPMetricExporterHTTP } from "@opentelemetry/exp
 import { OTLPMetricExporter as OTLPMetricExporterGRPC } from "@opentelemetry/exporter-metrics-otlp-grpc";
 
 import type { OtelObservabilityConfig } from "./config.js";
+import { setupGlobalPropagator } from "./propagation.js";
 import {
   METRIC_OPERATION_DURATION,
   METRIC_TOKEN_USAGE,
@@ -144,9 +145,16 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       resource,
       spanProcessors: [new BatchSpanProcessor(traceExporter)],
     });
-    tracerProvider.register();
+
+    // Register the composite W3C TraceContext + Baggage propagator as the
+    // global propagator so HTTP auto-instrumentations (and our exported
+    // injectTraceContext/extractTraceContext helpers) propagate
+    // `traceparent` across service boundaries by default.
+    const propagator = setupGlobalPropagator();
+    tracerProvider.register({ propagator });
 
     logger.info(`[otel] Trace exporter → ${traceEndpoint} (${config.protocol})`);
+    logger.info("[otel] W3C TraceContext + Baggage propagator registered globally");
   }
 
   // ── Metrics ─────────────────────────────────────────────────────

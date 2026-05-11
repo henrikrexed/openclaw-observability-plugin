@@ -662,13 +662,111 @@ describe("model_call_started / model_call_ended hooks (ISI-926)", () => {
     expect(chatSpan).toBeDefined();
     expect(chatSpan!.attrs["gen_ai.response.model"]).toBe("claude-3.5-sonnet-20241022");
     expect(chatSpan!.attrs["gen_ai.response.id"]).toBe("resp-abc123");
-    expect(chatSpan!.attrs["gen_ai.response.finish_reasons"]).toBe("stop");
+    expect(chatSpan!.attrs["gen_ai.response.finish_reasons"]).toEqual(["stop"]);
+    expect(Array.isArray(chatSpan!.attrs["gen_ai.response.finish_reasons"])).toBe(true);
+    expect(typeof chatSpan!.attrs["gen_ai.response.finish_reasons"]).not.toBe("string");
     expect(chatSpan!.attrs["gen_ai.usage.input_tokens"]).toBe(150);
     expect(chatSpan!.attrs["gen_ai.usage.output_tokens"]).toBe(80);
     expect(chatSpan!.attrs["gen_ai.usage.cache_read.input_tokens"]).toBe(100);
     expect(chatSpan!.attrs["gen_ai.usage.cache_creation.input_tokens"]).toBe(20);
     expect(chatSpan!.attrs["gen_ai.usage.total_tokens"]).toBe(290);
     expect(chatSpan!.ended).toBe(true);
+
+    stopHooks();
+  });
+
+  it("model_call_ended emits gen_ai.response.finish_reasons as string[] (ISI-993)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const modelStarted = typedHooks.get("model_call_started")!;
+    const modelEnded = typedHooks.get("model_call_ended")!;
+
+    resolve({}, { agentId: "a-multi", sessionKey: "s-multi" });
+    modelStarted(
+      { sessionKey: "s-multi", model: "claude-3.5-sonnet", provider: "anthropic" },
+      { sessionKey: "s-multi" },
+    );
+    modelEnded(
+      {
+        sessionKey: "s-multi",
+        responseModel: "claude-3.5-sonnet-20241022",
+        finishReasons: ["tool_use", "stop"],
+      },
+      { sessionKey: "s-multi" },
+    );
+
+    const chatSpan = spans.find((s) => s.spanName === "chat claude-3.5-sonnet");
+    expect(chatSpan).toBeDefined();
+    const reasons = chatSpan!.attrs["gen_ai.response.finish_reasons"];
+    expect(Array.isArray(reasons)).toBe(true);
+    expect(reasons).toEqual(["tool_use", "stop"]);
+    expect(typeof reasons).not.toBe("string");
+    expect(reasons).not.toContain(",");
+
+    stopHooks();
+  });
+
+  it("model_call_ended filters non-string entries from finish_reasons (ISI-993 L1)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const modelStarted = typedHooks.get("model_call_started")!;
+    const modelEnded = typedHooks.get("model_call_ended")!;
+
+    resolve({}, { agentId: "a-mixed", sessionKey: "s-mixed" });
+    modelStarted(
+      { sessionKey: "s-mixed", model: "claude-3.5-sonnet", provider: "anthropic" },
+      { sessionKey: "s-mixed" },
+    );
+    modelEnded(
+      {
+        sessionKey: "s-mixed",
+        responseModel: "claude-3.5-sonnet-20241022",
+        finishReasons: ["stop", null, undefined, 42, "", "tool_use"] as unknown as string[],
+      },
+      { sessionKey: "s-mixed" },
+    );
+
+    const chatSpan = spans.find((s) => s.spanName === "chat claude-3.5-sonnet");
+    expect(chatSpan).toBeDefined();
+    const reasons = chatSpan!.attrs["gen_ai.response.finish_reasons"];
+    expect(Array.isArray(reasons)).toBe(true);
+    expect(reasons).toEqual(["stop", "tool_use"]);
+
+    stopHooks();
+  });
+
+  it("model_call_ended omits finish_reasons when all entries are invalid (ISI-993 L1)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const modelStarted = typedHooks.get("model_call_started")!;
+    const modelEnded = typedHooks.get("model_call_ended")!;
+
+    resolve({}, { agentId: "a-bad", sessionKey: "s-bad" });
+    modelStarted(
+      { sessionKey: "s-bad", model: "claude-3.5-sonnet", provider: "anthropic" },
+      { sessionKey: "s-bad" },
+    );
+    modelEnded(
+      {
+        sessionKey: "s-bad",
+        responseModel: "claude-3.5-sonnet-20241022",
+        finishReasons: [null, undefined, 42, ""] as unknown as string[],
+      },
+      { sessionKey: "s-bad" },
+    );
+
+    const chatSpan = spans.find((s) => s.spanName === "chat claude-3.5-sonnet");
+    expect(chatSpan).toBeDefined();
+    expect(chatSpan!.attrs["gen_ai.response.finish_reasons"]).toBeUndefined();
 
     stopHooks();
   });
@@ -933,7 +1031,7 @@ describe("before_tool_call / after_tool_call hooks (ISI-927)", () => {
 
     const toolSpan = spans.find((s) => s.spanName === "execute_tool Bash");
     expect(toolSpan).toBeDefined();
-    expect(toolSpan!.attrs["gen_ai.tool.approval.requested"]).toBe(true);
+    expect(toolSpan!.attrs["openclaw.tool.approval.requested"]).toBe(true);
 
     expect(telemetry.counters.toolApprovals.add).toHaveBeenCalledWith(
       1,
@@ -968,8 +1066,8 @@ describe("before_tool_call / after_tool_call hooks (ISI-927)", () => {
 
     const toolSpan = spans.find((s) => s.spanName === "execute_tool Bash");
     expect(toolSpan).toBeDefined();
-    expect(toolSpan!.attrs["gen_ai.tool.approval.resolution"]).toBe("approved");
-    expect(toolSpan!.attrs["gen_ai.tool.approval.duration_ms"]).toBeDefined();
+    expect(toolSpan!.attrs["openclaw.tool.approval.resolution"]).toBe("approved");
+    expect(toolSpan!.attrs["openclaw.tool.approval.duration_ms"]).toBeDefined();
 
     stopHooks();
   });
@@ -1939,6 +2037,8 @@ describe("cron_changed / cron_executed hooks (ISI-929)", () => {
     expect(cronSpan!.attrs["gen_ai.agent.id"]).toBe("agent-2");
     expect(cronSpan!.attrs["gen_ai.provider.name"]).toBe("anthropic");
     expect(cronSpan!.attrs["code.function"]).toBe("cron_executed");
+    // ISI-993: `cron_executed` is not a valid OTel gen_ai.operation.name value.
+    expect(cronSpan!.attrs["gen_ai.operation.name"]).toBeUndefined();
     expect(cronSpan!.ended).toBe(true);
 
     expect(telemetry.counters.cronExecutions.add).toHaveBeenCalledWith(
