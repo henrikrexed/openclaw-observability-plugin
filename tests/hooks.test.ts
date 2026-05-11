@@ -1232,6 +1232,10 @@ describe("session_start / session_end hooks (ISI-928)", () => {
     expect(sessionSpan!.attrs["openclaw.session.key"]).toBe("sess-1");
     expect(sessionSpan!.attrs["openclaw.session.channel"]).toBe("cli");
     expect(sessionSpan!.attrs["openclaw.session.user_id"]).toBe("user-42");
+    // ISI-995: stable `user.id` mirrors the openclaw-namespaced user id so
+    // registry-keyed dashboards can correlate sessions without coupling
+    // to the openclaw.* namespace.
+    expect(sessionSpan!.attrs["user.id"]).toBe("user-42");
     expect(sessionSpan!.attrs["code.function"]).toBe("session_start");
     expect(sessionSpan!.ended).toBe(false);
 

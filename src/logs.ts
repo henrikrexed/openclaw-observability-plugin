@@ -7,12 +7,20 @@ import { OTLPLogExporter as OTLPLogExporterHTTP } from "@opentelemetry/exporter-
 import { OTLPLogExporter as OTLPLogExporterGRPC } from "@opentelemetry/exporter-logs-otlp-grpc";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
-import { trace, context } from "@opentelemetry/api";
+import { context } from "@opentelemetry/api";
 
 import type { OtelObservabilityConfig } from "./config.js";
 import type { TelemetryRuntime } from "./telemetry.js";
-import { OC_SCHEMA_VERSION, OPENCLAW_SCHEMA_VERSION } from "./semconv.js";
+import {
+  CODE_FILE_PATH,
+  CODE_FUNCTION_NAME,
+  CODE_LINE_NUMBER,
+  OC_SCHEMA_VERSION,
+  OPENCLAW_SCHEMA_VERSION,
+  OTEL_SCHEMA_URL,
+} from "./semconv.js";
 import { redactSensitiveText } from "./security.js";
+import { PLUGIN_VERSION } from "./version.js";
 
 type LogEvent = {
   type?: string;
@@ -156,6 +164,48 @@ export function parseLogConfig(raw: unknown): LogPipelineConfig {
   };
 }
 
+/**
+ * Build the AnyValueMap of LogRecord attributes from a LogEvent.
+ *
+ * Exported for unit tests (ISI-995). Runtime callers go through `emit()`
+ * inside `initLogPipeline`, which then redacts the body and forwards the
+ * active context to the LogRecord — so the OTLP-native trace_id /
+ * span_id / trace_flags travel with the record without needing a
+ * duplicate `openclaw.log.trace_id` attribute set.
+ *
+ * Per ISI-995, this helper emits OTel-stable `code.function.name`,
+ * `code.file.path`, and `code.line.number` for the emit site instead of
+ * the legacy `openclaw.log.function|file|line` triplet.
+ */
+export function buildLogAttributes(
+  evt: LogEvent,
+  sessionKey?: string,
+): AnyValueMap {
+  const attributes: AnyValueMap = {};
+
+  if (evt.logger) attributes["openclaw.log.logger"] = evt.logger;
+  if (evt.function) attributes[CODE_FUNCTION_NAME] = evt.function;
+  if (evt.file) attributes[CODE_FILE_PATH] = evt.file;
+  if (typeof evt.line === "number") attributes[CODE_LINE_NUMBER] = evt.line;
+  if (evt.type) attributes["openclaw.log.type"] = evt.type;
+  if (evt.sessionKey || sessionKey) {
+    attributes["openclaw.session.key"] = evt.sessionKey || sessionKey;
+  }
+  if (evt.agentId) attributes["openclaw.agent.id"] = evt.agentId;
+
+  for (const [k, v] of Object.entries(evt)) {
+    if (
+      k !== "type" && k !== "level" && k !== "message" && k !== "body" &&
+      k !== "logger" && k !== "function" && k !== "file" && k !== "line" &&
+      k !== "sessionKey" && k !== "agentId" && k !== "timestamp"
+    ) {
+      attributes[`openclaw.log.extra.${k}`] = toAnyValue(v);
+    }
+  }
+
+  return attributes;
+}
+
 // Exported for unit tests — see tests/logs.test.ts. Runtime callers should
 // keep going through emit(), which already routes string bodies/attrs
 // through redaction before this helper runs.
@@ -207,13 +257,19 @@ export function initLogPipeline(
       ? new OTLPLogExporterGRPC({ url: logEndpoint, headers: config.headers })
       : new OTLPLogExporterHTTP({ url: logEndpoint, headers: config.headers });
 
-  const resource = resourceFromAttributes({
-    [ATTR_SERVICE_NAME]: config.serviceName,
-    [ATTR_SERVICE_VERSION]: "0.1.0",
-    "openclaw.plugin": "otel-observability",
-    [OC_SCHEMA_VERSION]: OPENCLAW_SCHEMA_VERSION,
-    ...config.resourceAttributes,
-  });
+  // ISI-995: mirror the trace/metric Resource — real plugin version from
+  // openclaw.plugin.json (not the legacy "0.1.0" placeholder) and an
+  // OTel semconv schema URL so backends can resolve attribute names.
+  const resource = resourceFromAttributes(
+    {
+      [ATTR_SERVICE_NAME]: config.serviceName,
+      [ATTR_SERVICE_VERSION]: PLUGIN_VERSION,
+      "openclaw.plugin": "otel-observability",
+      [OC_SCHEMA_VERSION]: OPENCLAW_SCHEMA_VERSION,
+      ...config.resourceAttributes,
+    },
+    { schemaUrl: OTEL_SCHEMA_URL },
+  );
 
   const loggerProvider = new LoggerProvider({
     resource,
@@ -227,7 +283,10 @@ export function initLogPipeline(
 
   logs.setGlobalLoggerProvider(loggerProvider);
 
-  const otelLogger = loggerProvider.getLogger("openclaw-observability", "0.1.0");
+  // ISI-995: instrumentation-scope version tracks the real plugin version
+  // emitted on the Resource so the scope.version field on every LogRecord
+  // matches the release.
+  const otelLogger = loggerProvider.getLogger("openclaw-observability", PLUGIN_VERSION);
 
   const emit = (evt: LogEvent, sessionKey?: string) => {
     try {
@@ -236,37 +295,15 @@ export function initLogPipeline(
       const severityNumber = resolveSeverity(evt.level);
       const severityText = (evt.level || "info").toUpperCase();
 
-      const attributes: AnyValueMap = {};
+      const attributes = buildLogAttributes(evt, sessionKey);
 
-      if (evt.logger) attributes["openclaw.log.logger"] = evt.logger;
-      if (evt.function) attributes["openclaw.log.function"] = evt.function;
-      if (evt.file) attributes["openclaw.log.file"] = evt.file;
-      if (typeof evt.line === "number") attributes["openclaw.log.line"] = evt.line;
-      if (evt.type) attributes["openclaw.log.type"] = evt.type;
-      if (evt.sessionKey || sessionKey) {
-        attributes["openclaw.session.key"] = evt.sessionKey || sessionKey;
-      }
-      if (evt.agentId) attributes["openclaw.agent.id"] = evt.agentId;
-
-      for (const [k, v] of Object.entries(evt)) {
-        if (
-          k !== "type" && k !== "level" && k !== "message" && k !== "body" &&
-          k !== "logger" && k !== "function" && k !== "file" && k !== "line" &&
-          k !== "sessionKey" && k !== "agentId" && k !== "timestamp"
-        ) {
-          attributes[`openclaw.log.extra.${k}`] = toAnyValue(v);
-        }
-      }
-
-      const activeCtx = context.active();
-      const activeSpan = trace.getSpan(activeCtx);
-      let logContext = activeCtx;
-
-      if (activeSpan) {
-        attributes["openclaw.log.trace_id"] = activeSpan.spanContext().traceId;
-        attributes["openclaw.log.span_id"] = activeSpan.spanContext().spanId;
-        attributes["openclaw.log.trace_flags"] = activeSpan.spanContext().traceFlags;
-      }
+      // ISI-995: pass the active context into emit() so the LogRecord
+      // itself carries trace_id / span_id / trace_flags via the
+      // OTLP-native fields. Setting them as duplicate attributes
+      // (openclaw.log.trace_id etc.) was double-recording the same
+      // semantics and confused log-pipeline filters that already key on
+      // the OTLP LogRecord trace context.
+      const logContext = context.active();
 
       const timestamp = evt.timestamp || Date.now();
 
