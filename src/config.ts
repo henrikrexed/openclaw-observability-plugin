@@ -21,6 +21,13 @@ export interface OtelObservabilityConfig {
   captureContent: boolean;
   /** Metrics export interval in milliseconds */
   metricsIntervalMs: number;
+  /**
+   * Trace sampling rate from 0.0 (drop all) to 1.0 (keep all).
+   * When undefined, the SDK default (AlwaysOn) is used.
+   * Applied via ParentBasedSampler + TraceIdRatioBasedSampler so child
+   * spans honor the root sampling decision (head-based sampling).
+   */
+  sampleRate?: number;
   /** Additional OTel resource attributes */
   resourceAttributes: Record<string, string>;
   /** Optional log pipeline filtering configuration */
@@ -64,6 +71,13 @@ export function parseConfig(raw: unknown): OtelObservabilityConfig {
       typeof obj.metricsIntervalMs === "number" && obj.metricsIntervalMs >= 1000
         ? obj.metricsIntervalMs
         : DEFAULTS.metricsIntervalMs,
+    sampleRate:
+      typeof obj.sampleRate === "number" &&
+      Number.isFinite(obj.sampleRate) &&
+      obj.sampleRate >= 0 &&
+      obj.sampleRate <= 1
+        ? obj.sampleRate
+        : undefined,
     resourceAttributes:
       obj.resourceAttributes &&
       typeof obj.resourceAttributes === "object" &&

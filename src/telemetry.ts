@@ -11,8 +11,13 @@ import type { Span, Tracer, Meter, Counter, Histogram, UpDownCounter } from "@op
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 
-import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
-import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-node";
+import {
+  BatchSpanProcessor,
+  NodeTracerProvider,
+  ParentBasedSampler,
+  TraceIdRatioBasedSampler,
+} from "@opentelemetry/sdk-trace-node";
+import type { Sampler } from "@opentelemetry/sdk-trace-node";
 import { OTLPTraceExporter as OTLPTraceExporterHTTP } from "@opentelemetry/exporter-trace-otlp-http";
 import { OTLPTraceExporter as OTLPTraceExporterGRPC } from "@opentelemetry/exporter-trace-otlp-grpc";
 
@@ -169,10 +174,25 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
           ? new OTLPTraceExporterGRPC({ url: traceEndpoint, headers: config.headers })
           : new OTLPTraceExporterHTTP({ url: traceEndpoint, headers: config.headers });
 
+      // Head-based sampling: when sampleRate is set, wrap a TraceIdRatioBased
+      // sampler in a ParentBasedSampler so child spans inherit the root
+      // decision and distributed traces stay coherent. When sampleRate is
+      // omitted, omit the `sampler` key entirely so the SDK default
+      // (parentbased_always_on) applies — passing `sampler: undefined`
+      // would silently break if @opentelemetry/core ever stops dropping
+      // undefined keys in its internal merge().
+      let sampler: Sampler | undefined;
+      if (config.sampleRate !== undefined) {
+        sampler = new ParentBasedSampler({
+          root: new TraceIdRatioBasedSampler(config.sampleRate),
+        });
+      }
+
       // SDK v2: pass spanProcessors in constructor (addSpanProcessor was removed)
       tracerProvider = new NodeTracerProvider({
         resource,
         spanProcessors: [new BatchSpanProcessor(traceExporter)],
+        ...(sampler ? { sampler } : {}),
       });
 
       // Register the composite W3C TraceContext + Baggage propagator as the
@@ -182,7 +202,13 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       const propagator = setupGlobalPropagator();
       tracerProvider.register({ propagator });
 
-      logger.info(`[otel] Trace exporter → ${traceEndpoint} (${config.protocol})`);
+      const samplingNote =
+        config.sampleRate !== undefined
+          ? ` sampler=parentbased_traceidratio(${config.sampleRate})`
+          : "";
+      logger.info(
+        `[otel] Trace exporter → ${traceEndpoint} (${config.protocol})${samplingNote}`,
+      );
       logger.info("[otel] W3C TraceContext + Baggage propagator registered globally");
     }
   }
