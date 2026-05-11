@@ -407,4 +407,60 @@ describe("bridgeGatewayLogger (ISI-997)", () => {
     partial.error("bad");
     expect(emit).toHaveBeenCalledTimes(2);
   });
+
+  it("pino-style attrs cannot silently override structural fields", () => {
+    // Regression for code-review finding #1: a caller passing reserved keys
+    // (logger, timestamp, level) inside the attrs object must not rewrite
+    // the record's identity / time — those are emitted by the bridge.
+    const logger = makeLogger();
+    const emit = vi.fn();
+    bridgeGatewayLogger(logger, emit);
+
+    logger.info(
+      { logger: "myapp", timestamp: 0, level: "error", requestId: "r-1" },
+      "msg"
+    );
+
+    const [evt] = emit.mock.calls[0] as [LogEvent];
+    expect(evt.logger).toBe("openclaw-gateway");
+    expect(evt.level).toBe("info");
+    expect(typeof evt.timestamp).toBe("number");
+    expect(evt.timestamp).toBeGreaterThan(0);
+    expect(evt.message).toBe("msg");
+    // User-provided non-reserved attrs still pass through.
+    expect(evt.requestId).toBe("r-1");
+  });
+
+  it("is idempotent — double-bridging then restore() puts the truly-original method back", () => {
+    // Regression for code-review finding #2: calling bridgeGatewayLogger
+    // twice without an intervening restore() must not capture the
+    // already-wrapped function as the "original". A subsequent restore()
+    // must reinstall the truly-original method, not the previous wrapper.
+    const logger = makeLogger();
+    const emit = vi.fn();
+    const original = logger.info;
+
+    const restore1 = bridgeGatewayLogger(logger, emit);
+    const restore2 = bridgeGatewayLogger(logger, emit);
+
+    logger.info("once");
+    // Bridge fires exactly once per call even after a re-bridge — no stacking.
+    expect(emit).toHaveBeenCalledTimes(1);
+
+    // The second bridge detects the already-wrapped methods and skips them,
+    // so its returned restore is a no-op. The first bridge holds the
+    // captured truly-original methods.
+    restore2();
+    expect(logger.info).not.toBe(original); // still bridged
+    logger.info("still-bridged");
+    expect(emit).toHaveBeenCalledTimes(2);
+
+    restore1();
+    expect(logger.info).toBe(original);
+
+    logger.info("post-restore");
+    // The original method (a spy) is invoked, but emit is not.
+    expect(emit).toHaveBeenCalledTimes(2);
+    expect(original).toHaveBeenCalledWith("post-restore");
+  });
 });

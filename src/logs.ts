@@ -331,8 +331,13 @@ export function bridgeGatewayLogger(
   for (const lvl of levels) {
     const orig = baseLogger?.[lvl];
     if (typeof orig !== "function") continue;
+    // Idempotency: if a previous bridge call already wrapped this method,
+    // skip it. Otherwise we'd capture the wrapper as the "original" and the
+    // returned restore() would reinstall the wrapper instead of the truly-
+    // original method.
+    if ((orig as { __otelBridged?: boolean }).__otelBridged) continue;
     originals[lvl] = orig;
-    baseLogger[lvl] = function bridged(...args: unknown[]) {
+    const bridged = function (...args: unknown[]) {
       try {
         const evt = buildLogEvent(lvl, args);
         emit(evt);
@@ -344,6 +349,8 @@ export function bridgeGatewayLogger(
         args
       );
     };
+    (bridged as { __otelBridged?: boolean }).__otelBridged = true;
+    baseLogger[lvl] = bridged;
   }
 
   return () => {
@@ -371,12 +378,16 @@ function buildLogEvent(level: string, args: unknown[]): LogEvent {
     const attrs = { ...(first as Record<string, unknown>) };
     const message =
       typeof args[1] === "string" ? args[1] : stringifyArg(first);
+    // Spread attrs FIRST so reserved structural fields (level, message,
+    // logger, timestamp) below override anything a caller passed in. The
+    // downstream emit() picks these by name and a non-numeric timestamp
+    // would break the `* 1_000_000` math and silently drop the log.
     return {
+      ...attrs,
       level,
       message,
       logger: "openclaw-gateway",
       timestamp: Date.now(),
-      ...attrs,
     };
   }
   return {
