@@ -29,6 +29,27 @@ import {
   OPENCLAW_SCHEMA_VERSION,
 } from "./semconv.js";
 
+/**
+ * Env var set by instrumentation/preload.mjs when OpenClaw is launched with
+ * `NODE_OPTIONS=--import .../preload.mjs`. When set, an OTel SDK is already
+ * registered as the global TracerProvider in this process, and the plugin
+ * MUST NOT register a second one (the second register() silently replaces
+ * the preload's provider, and plugin spans stop reaching the exporter).
+ */
+const PRELOADED_OTEL_SDK_ENV = "OPENCLAW_OTEL_PRELOADED";
+
+/**
+ * Returns true when an OTel SDK has already been registered by the preload.
+ * Checks both the env var (survives subprocess forks via NODE_OPTIONS) and
+ * the legacy globalThis flag set by older preload versions.
+ */
+export function hasPreloadedOtelSdk(): boolean {
+  return (
+    process.env[PRELOADED_OTEL_SDK_ENV] === "1" ||
+    (globalThis as any).__OPENCLAW_OTEL_PRELOAD_ACTIVE === true
+  );
+}
+
 // ── Types ───────────────────────────────────────────────────────────
 
 export interface TelemetryRuntime {
@@ -135,26 +156,35 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
   let tracerProvider: NodeTracerProvider | undefined;
 
   if (config.traces) {
-    const traceExporter =
-      config.protocol === "grpc"
-        ? new OTLPTraceExporterGRPC({ url: traceEndpoint, headers: config.headers })
-        : new OTLPTraceExporterHTTP({ url: traceEndpoint, headers: config.headers });
+    if (hasPreloadedOtelSdk()) {
+      // Preload already registered a global TracerProvider with its own
+      // exporter. Registering a second provider here would silently replace
+      // the preload's, dropping GenAI auto-instrumentation spans. Reuse the
+      // existing global provider — trace.getTracer() below will return a
+      // tracer backed by it.
+      logger.info("[otel] Reusing preloaded OpenTelemetry SDK (skipping plugin TracerProvider registration)");
+    } else {
+      const traceExporter =
+        config.protocol === "grpc"
+          ? new OTLPTraceExporterGRPC({ url: traceEndpoint, headers: config.headers })
+          : new OTLPTraceExporterHTTP({ url: traceEndpoint, headers: config.headers });
 
-    // SDK v2: pass spanProcessors in constructor (addSpanProcessor was removed)
-    tracerProvider = new NodeTracerProvider({
-      resource,
-      spanProcessors: [new BatchSpanProcessor(traceExporter)],
-    });
+      // SDK v2: pass spanProcessors in constructor (addSpanProcessor was removed)
+      tracerProvider = new NodeTracerProvider({
+        resource,
+        spanProcessors: [new BatchSpanProcessor(traceExporter)],
+      });
 
-    // Register the composite W3C TraceContext + Baggage propagator as the
-    // global propagator so HTTP auto-instrumentations (and our exported
-    // injectTraceContext/extractTraceContext helpers) propagate
-    // `traceparent` across service boundaries by default.
-    const propagator = setupGlobalPropagator();
-    tracerProvider.register({ propagator });
+      // Register the composite W3C TraceContext + Baggage propagator as the
+      // global propagator so HTTP auto-instrumentations (and our exported
+      // injectTraceContext/extractTraceContext helpers) propagate
+      // `traceparent` across service boundaries by default.
+      const propagator = setupGlobalPropagator();
+      tracerProvider.register({ propagator });
 
-    logger.info(`[otel] Trace exporter → ${traceEndpoint} (${config.protocol})`);
-    logger.info("[otel] W3C TraceContext + Baggage propagator registered globally");
+      logger.info(`[otel] Trace exporter → ${traceEndpoint} (${config.protocol})`);
+      logger.info("[otel] W3C TraceContext + Baggage propagator registered globally");
+    }
   }
 
   // ── Metrics ─────────────────────────────────────────────────────
