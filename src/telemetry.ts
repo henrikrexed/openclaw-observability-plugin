@@ -171,6 +171,20 @@ export interface OtelCounters {
   subagentSpawns: Counter;
   /** Sub-agent completion events */
   subagentEnded: Counter;
+  /** Queue lane enqueue events */
+  queueLaneEnqueue: Counter;
+  /** Queue lane dequeue events */
+  queueLaneDequeue: Counter;
+  /** Session stuck events */
+  sessionStuck: Counter;
+  /** Session long-running events */
+  sessionLongRunning: Counter;
+  /** Session stalled events */
+  sessionStalled: Counter;
+  /** Liveness warning events */
+  livenessWarnings: Counter;
+  /** Diagnostic heartbeat events */
+  diagnosticHeartbeats: Counter;
 }
 
 export interface OtelHistograms {
@@ -190,11 +204,31 @@ export interface OtelHistograms {
   cronDuration: Histogram;
   /** Sub-agent duration in ms */
   subagentDuration: Histogram;
+  /** Queue depth */
+  queueDepth: Histogram;
+  /** Queue wait time in ms */
+  queueWaitMs: Histogram;
+  /** Session stuck age in ms */
+  sessionStuckAgeMs: Histogram;
+  /** Gateway event loop delay p99 in ms */
+  gatewayEventLoopDelayP99: Histogram;
+  /** Gateway event loop delay max in ms */
+  gatewayEventLoopDelayMax: Histogram;
+  /** Gateway event loop utilization */
+  gatewayEventLoopUtilization: Histogram;
+  /** Gateway CPU core ratio */
+  gatewayCpuCoreRatio: Histogram;
+  /** Gateway work queued */
+  gatewayWorkQueued: Histogram;
 }
 
 export interface OtelGauges {
   /** Currently active sessions */
   activeSessions: UpDownCounter;
+  /** Currently active requests */
+  activeRequests: UpDownCounter;
+  /** Currently active agent turns */
+  activeAgentTurns: UpDownCounter;
 }
 
 // ── Init ────────────────────────────────────────────────────────────
@@ -411,6 +445,37 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       description: "Total sub-agent completion events",
       unit: "events",
     }),
+    // Queue metrics (ISI-1017)
+    queueLaneEnqueue: meter.createCounter("openclaw.queue.lane.enqueue", {
+      description: "Total queue lane enqueue events",
+      unit: "events",
+    }),
+    queueLaneDequeue: meter.createCounter("openclaw.queue.lane.dequeue", {
+      description: "Total queue lane dequeue events",
+      unit: "events",
+    }),
+    // Session metrics (ISI-1017)
+    sessionStuck: meter.createCounter("openclaw.session.stuck", {
+      description: "Total session stuck events",
+      unit: "events",
+    }),
+    sessionLongRunning: meter.createCounter("openclaw.session.long_running", {
+      description: "Total session long-running events",
+      unit: "events",
+    }),
+    sessionStalled: meter.createCounter("openclaw.session.stalled", {
+      description: "Total session stalled events",
+      unit: "events",
+    }),
+    // Gateway health metrics (ISI-1016)
+    livenessWarnings: meter.createCounter("openclaw.liveness.warnings", {
+      description: "Total liveness warning events",
+      unit: "events",
+    }),
+    diagnosticHeartbeats: meter.createCounter("openclaw.diagnostic.heartbeats", {
+      description: "Total diagnostic heartbeat events",
+      unit: "events",
+    }),
   };
 
   const toolDuration = meter.createHistogram("openclaw.tool.duration", {
@@ -445,12 +510,55 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       description: "Sub-agent duration",
       unit: "ms",
     }),
+    // Queue histograms (ISI-1017)
+    queueDepth: meter.createHistogram("openclaw.queue.depth", {
+      description: "Queue depth",
+      unit: "items",
+    }),
+    queueWaitMs: meter.createHistogram("openclaw.queue.wait_ms", {
+      description: "Queue wait time",
+      unit: "ms",
+    }),
+    // Session histograms (ISI-1017)
+    sessionStuckAgeMs: meter.createHistogram("openclaw.session.stuck_age_ms", {
+      description: "Session stuck age",
+      unit: "ms",
+    }),
+    // Gateway health histograms (ISI-1016)
+    gatewayEventLoopDelayP99: meter.createHistogram("openclaw.gateway.event_loop_delay_p99", {
+      description: "Gateway event loop delay p99",
+      unit: "ms",
+    }),
+    gatewayEventLoopDelayMax: meter.createHistogram("openclaw.gateway.event_loop_delay_max", {
+      description: "Gateway event loop delay max",
+      unit: "ms",
+    }),
+    gatewayEventLoopUtilization: meter.createHistogram("openclaw.gateway.event_loop_utilization", {
+      description: "Gateway event loop utilization",
+      unit: "1",
+    }),
+    gatewayCpuCoreRatio: meter.createHistogram("openclaw.gateway.cpu_core_ratio", {
+      description: "Gateway CPU core ratio",
+      unit: "1",
+    }),
+    gatewayWorkQueued: meter.createHistogram("openclaw.gateway.work_queued", {
+      description: "Gateway work queued",
+      unit: "items",
+    }),
   };
 
   const gauges: OtelGauges = {
     activeSessions: meter.createUpDownCounter("openclaw.sessions.active", {
       description: "Currently active sessions",
       unit: "sessions",
+    }),
+    activeRequests: meter.createUpDownCounter("openclaw.requests.active", {
+      description: "Currently active requests",
+      unit: "requests",
+    }),
+    activeAgentTurns: meter.createUpDownCounter("openclaw.agent_turns.active", {
+      description: "Currently active agent turns",
+      unit: "turns",
     }),
   };
 
