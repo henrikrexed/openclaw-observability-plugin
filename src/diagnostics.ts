@@ -86,6 +86,54 @@ export async function registerDiagnosticsListener(
   const { counters, histograms } = telemetry;
 
   const unsubscribe = onDiagnosticEvent((evt: any) => {
+    // ISI-1017: Queue events
+    if (evt.type === "queue.lane.enqueue") {
+      const { lane, depth, waitMs } = evt;
+      const attrs: Record<string, string | number> = {};
+      if (lane) attrs["openclaw.queue.lane"] = lane;
+      counters.queueLaneEnqueue.add(1, attrs);
+      if (typeof depth === "number") histograms.queueDepth.record(depth, attrs);
+      if (typeof waitMs === "number") histograms.queueWaitMs.record(waitMs, attrs);
+      logger.debug?.(`[otel] queue.lane.enqueue: lane=${lane}, depth=${depth}, waitMs=${waitMs}`);
+      return;
+    }
+
+    if (evt.type === "queue.lane.dequeue") {
+      const { lane, depth } = evt;
+      const attrs: Record<string, string | number> = {};
+      if (lane) attrs["openclaw.queue.lane"] = lane;
+      counters.queueLaneDequeue.add(1, attrs);
+      if (typeof depth === "number") histograms.queueDepth.record(depth, attrs);
+      logger.debug?.(`[otel] queue.lane.dequeue: lane=${lane}, depth=${depth}`);
+      return;
+    }
+
+    // ISI-1017: Session events
+    if (evt.type === "session.stuck") {
+      const { sessionKey, ageMs } = evt;
+      const attrs = { "openclaw.session.key": sessionKey || "unknown" };
+      counters.sessionStuck.add(1, attrs);
+      if (typeof ageMs === "number") histograms.sessionStuckAgeMs.record(ageMs, attrs);
+      logger.debug?.(`[otel] session.stuck: session=${sessionKey}, ageMs=${ageMs}`);
+      return;
+    }
+
+    if (evt.type === "session.long_running") {
+      const { sessionKey, ageMs } = evt;
+      const attrs = { "openclaw.session.key": sessionKey || "unknown" };
+      counters.sessionLongRunning.add(1, attrs);
+      logger.debug?.(`[otel] session.long_running: session=${sessionKey}, ageMs=${ageMs}`);
+      return;
+    }
+
+    if (evt.type === "session.stalled") {
+      const { sessionKey, ageMs } = evt;
+      const attrs = { "openclaw.session.key": sessionKey || "unknown" };
+      counters.sessionStalled.add(1, attrs);
+      logger.debug?.(`[otel] session.stalled: session=${sessionKey}, ageMs=${ageMs}`);
+      return;
+    }
+
     if (evt.type !== "model.usage") return;
 
     const sessionKey = evt.sessionKey || "unknown";
