@@ -597,7 +597,11 @@ export function registerHooks(
         if (typeof contextUsed === "number") {
           agentSpan.setAttribute("openclaw.context.used", contextUsed);
         }
-        if (typeof contextLimit === "number" && typeof contextUsed === "number") {
+        if (
+          typeof contextLimit === "number" &&
+          contextLimit > 0 &&
+          typeof contextUsed === "number"
+        ) {
           agentSpan.setAttribute("openclaw.context.utilization", contextUsed / contextLimit);
         }
 
