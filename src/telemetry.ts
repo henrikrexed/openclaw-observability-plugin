@@ -9,7 +9,8 @@
 import { trace, metrics, context, SpanKind, SpanStatusCode } from "@opentelemetry/api";
 import type { Span, Tracer, Meter, Counter, Histogram, UpDownCounter } from "@opentelemetry/api";
 import { resourceFromAttributes } from "@opentelemetry/resources";
-import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
+import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION, ATTR_HOST_NAME, ATTR_DEPLOYMENT_ENVIRONMENT } from "@opentelemetry/semantic-conventions";
+import { hostname } from "node:os";
 
 import {
   BatchSpanProcessor,
@@ -171,6 +172,10 @@ export interface OtelCounters {
   subagentSpawns: Counter;
   /** Sub-agent completion events */
   subagentEnded: Counter;
+  /** Liveness warning events */
+  livenessWarnings: Counter;
+  /** Diagnostic heartbeat events */
+  diagnosticHeartbeats: Counter;
 }
 
 export interface OtelHistograms {
@@ -190,6 +195,16 @@ export interface OtelHistograms {
   cronDuration: Histogram;
   /** Sub-agent duration in ms */
   subagentDuration: Histogram;
+  /** P99 event-loop delay from liveness warnings (ms) */
+  gatewayEventLoopDelayP99: Histogram;
+  /** Max event-loop delay from liveness warnings (ms) */
+  gatewayEventLoopDelayMax: Histogram;
+  /** Event-loop utilization from liveness warnings */
+  gatewayEventLoopUtilization: Histogram;
+  /** CPU core ratio from liveness warnings */
+  gatewayCpuCoreRatio: Histogram;
+  /** Work queued count from heartbeats / liveness */
+  gatewayWorkQueued: Histogram;
 }
 
 export interface OtelGauges {
@@ -208,6 +223,9 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     [ATTR_SERVICE_VERSION]: PLUGIN_VERSION,
     "openclaw.plugin": "otel-observability",
     [OC_SCHEMA_VERSION]: OPENCLAW_SCHEMA_VERSION,
+    [ATTR_HOST_NAME]: hostname(),
+    [ATTR_DEPLOYMENT_ENVIRONMENT]:
+      process.env.DEPLOYMENT_ENVIRONMENT || process.env.NODE_ENV || "production",
     ...config.resourceAttributes,
   };
 
@@ -411,6 +429,14 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       description: "Total sub-agent completion events",
       unit: "events",
     }),
+    livenessWarnings: meter.createCounter("openclaw.liveness.warning", {
+      description: "Diagnostic liveness warning events",
+      unit: "1",
+    }),
+    diagnosticHeartbeats: meter.createCounter("openclaw.diagnostic.heartbeat", {
+      description: "Diagnostic heartbeat events",
+      unit: "1",
+    }),
   };
 
   const toolDuration = meter.createHistogram("openclaw.tool.duration", {
@@ -444,6 +470,26 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     subagentDuration: meter.createHistogram("openclaw.subagent.duration", {
       description: "Sub-agent duration",
       unit: "ms",
+    }),
+    gatewayEventLoopDelayP99: meter.createHistogram("openclaw.liveness.event_loop_delay_p99_ms", {
+      description: "P99 event-loop delay reported by diagnostic liveness warnings",
+      unit: "ms",
+    }),
+    gatewayEventLoopDelayMax: meter.createHistogram("openclaw.liveness.event_loop_delay_max_ms", {
+      description: "Maximum event-loop delay reported by diagnostic liveness warnings",
+      unit: "ms",
+    }),
+    gatewayEventLoopUtilization: meter.createHistogram("openclaw.liveness.event_loop_utilization", {
+      description: "Event-loop utilization reported by diagnostic liveness warnings",
+      unit: "1",
+    }),
+    gatewayCpuCoreRatio: meter.createHistogram("openclaw.liveness.cpu_core_ratio", {
+      description: "CPU core ratio reported by diagnostic liveness warnings",
+      unit: "1",
+    }),
+    gatewayWorkQueued: meter.createHistogram("openclaw.gateway.work_queued", {
+      description: "Queued work items reported by diagnostic heartbeats and liveness",
+      unit: "1",
     }),
   };
 
@@ -481,6 +527,13 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       counters.sensitiveFileAccess.add(0, idleAttrs);
       counters.promptInjection.add(0, idleAttrs);
       counters.dangerousCommand.add(0, idleAttrs);
+      counters.livenessWarnings.add(0, idleAttrs);
+      counters.diagnosticHeartbeats.add(0, idleAttrs);
+      histograms.gatewayEventLoopDelayP99.record(0, idleAttrs);
+      histograms.gatewayEventLoopDelayMax.record(0, idleAttrs);
+      histograms.gatewayEventLoopUtilization.record(0, idleAttrs);
+      histograms.gatewayCpuCoreRatio.record(0, idleAttrs);
+      histograms.gatewayWorkQueued.record(0, idleAttrs);
     } catch {
       // Never let metric heartbeat errors affect the gateway
     }

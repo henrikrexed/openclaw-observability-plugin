@@ -7,7 +7,7 @@
  * - Official diagnostics: Accurate cost, token counts, context limits
  */
 
-import type { Span } from "@opentelemetry/api";
+import { Span, SpanStatusCode } from "@opentelemetry/api";
 import type { TelemetryRuntime } from "./telemetry.js";
 import {
   GEN_AI_CONVERSATION_ID,
@@ -86,6 +86,83 @@ export async function registerDiagnosticsListener(
   const { counters, histograms } = telemetry;
 
   const unsubscribe = onDiagnosticEvent((evt: any) => {
+    if (evt.type === "diagnostic.liveness.warning") {
+      const {
+        reasons,
+        eventLoopDelayP99Ms,
+        eventLoopDelayMaxMs,
+        eventLoopUtilization,
+        cpuCoreRatio,
+        active,
+        waiting,
+        queued,
+      } = evt;
+
+      const livenessAttrs: Record<string, string | number | boolean> = {};
+      if (reasons && Array.isArray(reasons)) {
+        livenessAttrs["openclaw.liveness.reasons"] = reasons.join(", ");
+      }
+      if (typeof active === "number") {
+        livenessAttrs["openclaw.liveness.active"] = active;
+      }
+      if (typeof waiting === "number") {
+        livenessAttrs["openclaw.liveness.waiting"] = waiting;
+      }
+      if (typeof queued === "number") {
+        livenessAttrs["openclaw.liveness.queued"] = queued;
+      }
+
+      counters.livenessWarnings.add(1, livenessAttrs);
+
+      if (typeof eventLoopDelayP99Ms === "number") {
+        histograms.gatewayEventLoopDelayP99.record(eventLoopDelayP99Ms, livenessAttrs);
+      }
+      if (typeof eventLoopDelayMaxMs === "number") {
+        histograms.gatewayEventLoopDelayMax.record(eventLoopDelayMaxMs, livenessAttrs);
+      }
+      if (typeof eventLoopUtilization === "number") {
+        histograms.gatewayEventLoopUtilization.record(eventLoopUtilization, livenessAttrs);
+      }
+      if (typeof cpuCoreRatio === "number") {
+        histograms.gatewayCpuCoreRatio.record(cpuCoreRatio, livenessAttrs);
+      }
+      if (typeof queued === "number") {
+        histograms.gatewayWorkQueued.record(queued, livenessAttrs);
+      }
+
+      // Create a span for the liveness warning so backends can surface
+      // it alongside traces without requiring metric-only alerting.
+      const span = telemetry.tracer.startSpan("openclaw.liveness.warning", {
+        kind: 1, // SpanKind.INTERNAL
+        attributes: {
+          ...livenessAttrs,
+          "openclaw.liveness.event_loop_delay_p99_ms": eventLoopDelayP99Ms,
+          "openclaw.liveness.event_loop_delay_max_ms": eventLoopDelayMaxMs,
+          "openclaw.liveness.event_loop_utilization": eventLoopUtilization,
+          "openclaw.liveness.cpu_core_ratio": cpuCoreRatio,
+        },
+      });
+      span.setStatus({ code: SpanStatusCode.ERROR, message: reasons?.join(", ") || "liveness warning" });
+      span.end();
+
+      logger.debug?.(
+        `[otel] liveness.warning: reasons=${reasons?.join(";")}, ` +
+          `p99=${eventLoopDelayP99Ms}ms, max=${eventLoopDelayMaxMs}ms, ` +
+          `elu=${eventLoopUtilization}, cpuRatio=${cpuCoreRatio}`,
+      );
+      return;
+    }
+
+    if (evt.type === "diagnostic.heartbeat") {
+      const { queued } = evt;
+      counters.diagnosticHeartbeats.add(1);
+      if (typeof queued === "number") {
+        histograms.gatewayWorkQueued.record(queued);
+      }
+      logger.debug?.(`[otel] heartbeat: queued=${queued}`);
+      return;
+    }
+
     if (evt.type !== "model.usage") return;
 
     const sessionKey = evt.sessionKey || "unknown";
@@ -165,7 +242,7 @@ export async function registerDiagnosticsListener(
     logger.debug?.(`[otel] model.usage: session=${sessionKey}, model=${model}, cost=$${costUsd?.toFixed(4) || "?"}, tokens=${usage.total || "?"}`);
   });
 
-  logger.info("[otel] Subscribed to OpenClaw diagnostic events (model.usage, etc.)");
+  logger.info("[otel] Subscribed to OpenClaw diagnostic events (model.usage, liveness.warning, heartbeat)");
   return unsubscribe;
 }
 
