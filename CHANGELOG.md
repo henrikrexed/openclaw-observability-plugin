@@ -4,6 +4,26 @@ All notable changes to the `@henrikrexed/openclaw-otel-observability` plugin are
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.4.1...v0.5.0) (2026-05-12)
+
+
+### Features
+
+* **ISI-1017:** add queue and session state metrics ([d8ac76f](https://github.com/henrikrexed/openclaw-observability-plugin/commit/d8ac76f503ffca56f3ecd0d9604014d18576cbff))
+* **ISI-1017:** add queue and session state metrics ([7ca1d20](https://github.com/henrikrexed/openclaw-observability-plugin/commit/7ca1d2006b7e6a7817e98f5df364c7696e3a4c49))
+* **ISI-1017:** add queue and session state metrics ([1814f3a](https://github.com/henrikrexed/openclaw-observability-plugin/commit/1814f3ac3eaebf6be21b55d4156b708724d527aa))
+* **ISI-1018:** add context layer and skill usage tracking ([473833c](https://github.com/henrikrexed/openclaw-observability-plugin/commit/473833c9bc4faf403dcbb5945da21588dbc270bf))
+* **ISI-1018:** add context layer and skill usage tracking ([2410d66](https://github.com/henrikrexed/openclaw-observability-plugin/commit/2410d662da488845def3f1f59b31c4cbbd7efe38))
+* **ISI-1019:** add subagent deep tracing enhancements ([cf0bf88](https://github.com/henrikrexed/openclaw-observability-plugin/commit/cf0bf88c480f85897a3e4d76463cb213435aef9b))
+* **ISI-1019:** add subagent deep tracing enhancements ([a8706f6](https://github.com/henrikrexed/openclaw-observability-plugin/commit/a8706f6cddc80b595a32ecccf5fe232fb1cc740c))
+* **ISI-1020:** add webhook observability ([2f91324](https://github.com/henrikrexed/openclaw-observability-plugin/commit/2f9132442a20b0c15d5babeb732e3711c519f828))
+* **ISI-1020:** add webhook observability ([b6d48a2](https://github.com/henrikrexed/openclaw-observability-plugin/commit/b6d48a2bbae52b7884457bca88af272aa03205ec))
+
+
+### Bug Fixes
+
+* guard context utilization against zero context limit ([b3db23b](https://github.com/henrikrexed/openclaw-observability-plugin/commit/b3db23b75dcb29c6a3022450a487bf28f11d7867))
+
 ## [0.4.1](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.4.0...v0.4.1) (2026-05-12)
 
 
