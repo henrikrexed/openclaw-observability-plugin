@@ -4,6 +4,14 @@ All notable changes to the `@henrikrexed/openclaw-otel-observability` plugin are
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.4.0...v0.4.1) (2026-05-12)
+
+
+### Bug Fixes
+
+* W3C trace context propagation for subagent sessions (ISI-1021) ([079d2f4](https://github.com/henrikrexed/openclaw-observability-plugin/commit/079d2f49ad8451d1c0274fe962a0664872904086))
+* W3C trace context propagation for subagent sessions (ISI-1021) ([d02ec10](https://github.com/henrikrexed/openclaw-observability-plugin/commit/d02ec10b9b2badd24540cdeb302c67f9ef8c69da))
+
 ## [0.4.0](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.3.0...v0.4.0) (2026-05-12)
 
 
