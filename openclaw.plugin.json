@@ -2,7 +2,7 @@
   "id": "otel-observability",
   "name": "OpenTelemetry Observability",
   "description": "Traces, metrics, and logs for OpenClaw using OpenLLMetry and OpenTelemetry",
-  "version": "0.5.0",
+  "version": "0.4.0",
   "minOpenClawVersion": "2026.4.21",
   "uiHints": {
     "endpoint": {
@@ -53,7 +53,10 @@
       },
       "protocol": {
         "type": "string",
-        "enum": ["http", "grpc"],
+        "enum": [
+          "http",
+          "grpc"
+        ],
         "description": "OTLP export protocol"
       },
       "serviceName": {
@@ -82,16 +85,33 @@
       "captureContent": {
         "description": "Content capture policy. `true`/`false` toggle every category at once; an object selects categories individually. Unknown keys are tolerated by the parser and ignored at runtime. See docs/security/privacy.md.",
         "oneOf": [
-          { "type": "boolean" },
+          {
+            "type": "boolean"
+          },
           {
             "type": "object",
             "additionalProperties": true,
             "properties": {
-              "inputMessages": { "type": "boolean", "description": "Capture inbound user message text on the request/agent.turn spans." },
-              "outputMessages": { "type": "boolean", "description": "Capture outbound assistant reply text on the message.sent span." },
-              "toolInputs": { "type": "boolean", "description": "Capture full tool-call input arguments on the execute_tool span." },
-              "toolOutputs": { "type": "boolean", "description": "Capture tool-call result text on the execute_tool span." },
-              "systemPrompt": { "type": "boolean", "description": "Capture the system prompt on the agent.turn span." }
+              "inputMessages": {
+                "type": "boolean",
+                "description": "Capture inbound user message text on the request/agent.turn spans."
+              },
+              "outputMessages": {
+                "type": "boolean",
+                "description": "Capture outbound assistant reply text on the message.sent span."
+              },
+              "toolInputs": {
+                "type": "boolean",
+                "description": "Capture full tool-call input arguments on the execute_tool span."
+              },
+              "toolOutputs": {
+                "type": "boolean",
+                "description": "Capture tool-call result text on the execute_tool span."
+              },
+              "systemPrompt": {
+                "type": "boolean",
+                "description": "Capture the system prompt on the agent.turn span."
+              }
             }
           }
         ]
