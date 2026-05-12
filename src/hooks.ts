@@ -2092,6 +2092,13 @@ export function registerHooks(
         const childAgentId = event?.childAgentId || event?.agentId || "unknown";
         const childAgentName = event?.childAgentName || childAgentId;
 
+        // ISI-1019: Model usage tracking for subagents
+        const model = event?.model || event?.responseModel || "unknown";
+        const usage = event?.usage || {};
+        const inputTokens = usage.input ?? usage.inputTokens ?? 0;
+        const outputTokens = usage.output ?? usage.outputTokens ?? 0;
+        const totalTokens = inputTokens + outputTokens;
+
         const parentSessionCtx = store.getActiveContext(parentSessionKey);
         const subagentKey = `__subagent_${childSessionKey}`;
         const active = parentSessionCtx?.activeToolSpans?.get(subagentKey);
@@ -2102,6 +2109,20 @@ export function registerHooks(
 
           span.setAttribute(OC_SUBAGENT_DURATION_MS, elapsed);
           span.setAttribute(OC_SUBAGENT_SUCCESS, success);
+
+          // ISI-1019: Add model usage attributes to subagent span
+          if (model !== "unknown") {
+            span.setAttribute(GEN_AI_RESPONSE_MODEL, model);
+          }
+          if (inputTokens > 0) {
+            span.setAttribute(GEN_AI_USAGE_INPUT_TOKENS, inputTokens);
+          }
+          if (outputTokens > 0) {
+            span.setAttribute(GEN_AI_USAGE_OUTPUT_TOKENS, outputTokens);
+          }
+          if (totalTokens > 0) {
+            span.setAttribute("openclaw.subagent.tokens_total", totalTokens);
+          }
 
           if (errorMsg) {
             const errStr = String(errorMsg).slice(0, 500);
@@ -2114,7 +2135,19 @@ export function registerHooks(
 
           histograms.subagentDuration.record(elapsed, {
             [OC_SUBAGENT_CHILD_AGENT_NAME]: childAgentName,
+            [GEN_AI_RESPONSE_MODEL]: model,
           });
+
+          // ISI-1019: Record token usage metrics for subagent
+          if (totalTokens > 0) {
+            const metricAttrs = {
+              [OC_SUBAGENT_CHILD_AGENT_NAME]: childAgentName,
+              [GEN_AI_RESPONSE_MODEL]: model,
+            };
+            counters.tokensPrompt.add(inputTokens, metricAttrs);
+            counters.tokensCompletion.add(outputTokens, metricAttrs);
+            counters.tokensTotal.add(totalTokens, metricAttrs);
+          }
 
           span.end();
           parentSessionCtx!.activeToolSpans!.delete(subagentKey);
@@ -2127,7 +2160,7 @@ export function registerHooks(
 
         store.unlinkSubAgent(childSessionKey);
 
-        logger.debug?.(`[otel] Sub-agent ended: child=${childSessionKey}, parent=${parentSessionKey}, success=${success}`);
+        logger.debug?.(`[otel] Sub-agent ended: child=${childSessionKey}, parent=${parentSessionKey}, success=${success}, model=${model}, tokens=${totalTokens}`);
       } catch {
       }
 
