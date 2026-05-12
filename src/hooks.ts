@@ -2338,6 +2338,182 @@ export function registerHooks(
   logger.info("[otel] Registered cron_executed hook (via api.on)");
 
   // ═══════════════════════════════════════════════════════════════════
+  // WEBHOOK HOOKS (ISI-1020)
+  // ═══════════════════════════════════════════════════════════════════
+
+  // ── webhook_received ──────────────────────────────────────────────
+  // Fires when a webhook is received by the gateway. Creates a SERVER
+  // span to track the webhook processing lifecycle.
+
+  api.on(
+    "webhook_received",
+    (event: any, ctx: any) => {
+      try {
+        const tel = getTelemetry();
+        if (!tel) return undefined;
+        const { tracer, counters, histograms } = tel;
+
+        const source = event?.source || event?.provider || "unknown";
+        const webhookId = event?.webhookId || event?.id || "unknown";
+        const eventType = event?.eventType || event?.type || "unknown";
+        const payloadSize = event?.payloadSize || event?.body?.length || 0;
+        const sessionKey = ctx?.sessionKey || event?.sessionKey || `webhook_${webhookId}`;
+
+        const span = tracer.startSpan("openclaw.webhook.received", {
+          kind: SpanKind.SERVER,
+          attributes: {
+            "openclaw.webhook.source": source,
+            "openclaw.webhook.id": webhookId,
+            "openclaw.webhook.event_type": eventType,
+            "openclaw.webhook.payload_size": payloadSize,
+            "openclaw.session.key": sessionKey,
+            ...codeAttrs("webhook_received"),
+          },
+        });
+
+        const webhookContext = trace.setSpan(context.active(), span);
+
+        store.setActiveContext(sessionKey, {
+          rootSpan: span,
+          rootContext: webhookContext,
+          startTime: Date.now(),
+        });
+
+        counters.webhooksReceived.add(1, {
+          "openclaw.webhook.source": source,
+          "openclaw.webhook.event_type": eventType,
+        });
+
+        if (typeof payloadSize === "number" && payloadSize > 0) {
+          histograms.webhookPayloadSize.record(payloadSize, {
+            "openclaw.webhook.source": source,
+          });
+        }
+
+        logger.debug?.(`[otel] Webhook received: source=${source}, id=${webhookId}, type=${eventType}, size=${payloadSize}`);
+      } catch {
+      }
+
+      return undefined;
+    },
+    { priority: 100 }
+  );
+
+  logger.info("[otel] Registered webhook_received hook (via api.on)");
+
+  // ── webhook_processed ─────────────────────────────────────────────
+  // Fires when a webhook has been successfully processed. Closes the
+  // webhook span and records success metrics.
+
+  api.on(
+    "webhook_processed",
+    (event: any, ctx: any) => {
+      try {
+        const tel = getTelemetry();
+        if (!tel) return undefined;
+        const { counters, histograms } = tel;
+
+        const source = event?.source || event?.provider || "unknown";
+        const webhookId = event?.webhookId || event?.id || "unknown";
+        const eventType = event?.eventType || event?.type || "unknown";
+        const durationMs = event?.durationMs;
+        const sessionKey = ctx?.sessionKey || event?.sessionKey || `webhook_${webhookId}`;
+
+        const sessionCtx = store.getActiveContext(sessionKey);
+        const span = sessionCtx?.rootSpan;
+
+        if (span) {
+          span.setAttribute("openclaw.webhook.processed", true);
+
+          if (typeof durationMs === "number") {
+            span.setAttribute("openclaw.webhook.duration_ms", durationMs);
+            histograms.webhookDuration.record(durationMs, {
+              "openclaw.webhook.source": source,
+              "openclaw.webhook.event_type": eventType,
+            });
+          }
+
+          span.setStatus({ code: SpanStatusCode.OK });
+          span.end();
+        }
+
+        counters.webhooksProcessed.add(1, {
+          "openclaw.webhook.source": source,
+          "openclaw.webhook.event_type": eventType,
+        });
+
+        store.cleanupSession(sessionKey);
+
+        logger.debug?.(`[otel] Webhook processed: source=${source}, id=${webhookId}, duration=${durationMs}ms`);
+      } catch {
+      }
+
+      return undefined;
+    },
+    { priority: -100 }
+  );
+
+  logger.info("[otel] Registered webhook_processed hook (via api.on)");
+
+  // ── webhook_error ─────────────────────────────────────────────────
+  // Fires when a webhook processing fails. Records error metrics and
+  // closes the webhook span with error status.
+
+  api.on(
+    "webhook_error",
+    (event: any, ctx: any) => {
+      try {
+        const tel = getTelemetry();
+        if (!tel) return undefined;
+        const { counters, histograms } = tel;
+
+        const source = event?.source || event?.provider || "unknown";
+        const webhookId = event?.webhookId || event?.id || "unknown";
+        const eventType = event?.eventType || event?.type || "unknown";
+        const errorMsg = event?.error || "unknown error";
+        const durationMs = event?.durationMs;
+        const sessionKey = ctx?.sessionKey || event?.sessionKey || `webhook_${webhookId}`;
+
+        const sessionCtx = store.getActiveContext(sessionKey);
+        const span = sessionCtx?.rootSpan;
+
+        if (span) {
+          const errStr = String(errorMsg).slice(0, 500);
+          span.setAttribute(ERROR_TYPE, "webhook_error");
+          span.setAttribute("openclaw.webhook.error", errStr);
+          span.recordException({ name: "WebhookError", message: errStr });
+          span.setStatus({ code: SpanStatusCode.ERROR, message: errStr.slice(0, 200) });
+
+          if (typeof durationMs === "number") {
+            span.setAttribute("openclaw.webhook.duration_ms", durationMs);
+            histograms.webhookDuration.record(durationMs, {
+              "openclaw.webhook.source": source,
+              "openclaw.webhook.event_type": eventType,
+            });
+          }
+
+          span.end();
+        }
+
+        counters.webhooksErrors.add(1, {
+          "openclaw.webhook.source": source,
+          "openclaw.webhook.event_type": eventType,
+        });
+
+        store.cleanupSession(sessionKey);
+
+        logger.debug?.(`[otel] Webhook error: source=${source}, id=${webhookId}, error=${errorMsg}`);
+      } catch {
+      }
+
+      return undefined;
+    },
+    { priority: -100 }
+  );
+
+  logger.info("[otel] Registered webhook_error hook (via api.on)");
+
+  // ═══════════════════════════════════════════════════════════════════
   // EVENT-STREAM HOOKS — registered via api.registerHook()
   // ═══════════════════════════════════════════════════════════════════
 
