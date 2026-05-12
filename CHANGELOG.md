@@ -4,6 +4,41 @@ All notable changes to the `@henrikrexed/openclaw-otel-observability` plugin are
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.3.0...v0.4.0) (2026-05-12)
+
+
+### Features
+
+* **dashboard:** align repo OpenClaw overview to V3 spans (ISI-1007) ([c250fe1](https://github.com/henrikrexed/openclaw-observability-plugin/commit/c250fe1a11715dd5875cc9a861b62070e89cc57e))
+* **dashboard:** align repo OpenClaw overview to V3 spans (ISI-1007) ([511201f](https://github.com/henrikrexed/openclaw-observability-plugin/commit/511201f98ed7cb4659e003109150deff8ac3f0cd))
+* **otel:** configurable trace sampling rate (ISI-998) ([32afcdf](https://github.com/henrikrexed/openclaw-observability-plugin/commit/32afcdf491a66f16cad1cf3c26adada0e1fe8d44))
+* **otel:** configurable trace sampling rate (ISI-998) ([acd6a7c](https://github.com/henrikrexed/openclaw-observability-plugin/commit/acd6a7ca0a736faa97c1f9c074a1c3cc9ebe7680))
+* **otel:** granular ContentCapturePolicy for span content capture (ISI-1000) ([592920d](https://github.com/henrikrexed/openclaw-observability-plugin/commit/592920d565c40c7c19526ceb27513e8ac4a33b8e))
+* **otel:** granular ContentCapturePolicy for span content capture (ISI-1000) ([aa207b1](https://github.com/henrikrexed/openclaw-observability-plugin/commit/aa207b1af2b22bdd496195da3904691035449130))
+* **otel:** W3C trace context propagation (ISI-1001) ([53695b1](https://github.com/henrikrexed/openclaw-observability-plugin/commit/53695b19587653c2c2783c295611aabd9f655ca9))
+* **otel:** W3C trace context propagation for distributed tracing (ISI-1001) ([95e2178](https://github.com/henrikrexed/openclaw-observability-plugin/commit/95e217888c8ba09af5ce03bf85553be4381161b0))
+* **otel:** wire OTLP log export pipeline into plugin lifecycle (ISI-997) ([d26944c](https://github.com/henrikrexed/openclaw-observability-plugin/commit/d26944c43aea667a5ab0546d538afe7916c08d43))
+* **otel:** wire OTLP log export pipeline into plugin lifecycle (ISI-997) ([e46a236](https://github.com/henrikrexed/openclaw-observability-plugin/commit/e46a2367623581f1961db718bfcf5abf410c148c))
+* publish to npm + add release-please/publish workflows (ISI-947) ([20a9f62](https://github.com/henrikrexed/openclaw-observability-plugin/commit/20a9f62aba2f478c9df17cf06cc5524c6226b386))
+* publish to npm + add release-please/publish workflows (ISI-947) ([2ba08c1](https://github.com/henrikrexed/openclaw-observability-plugin/commit/2ba08c1251b21675c5feb54eaca69c24e4b91cbe))
+* **security:** redact sensitive values from trace attributes (ISI-999) ([2013060](https://github.com/henrikrexed/openclaw-observability-plugin/commit/2013060fee00c0e2acdd7e1587d6db0df8bd4e43))
+* **security:** redact sensitive values from trace attributes (ISI-999) ([675311a](https://github.com/henrikrexed/openclaw-observability-plugin/commit/675311af452afa3727a43075db885949e74525bc))
+
+
+### Bug Fixes
+
+* **otel:** address PR [#30](https://github.com/henrikrexed/openclaw-observability-plugin/issues/30) review findings (ISI-1000) ([48eb16d](https://github.com/henrikrexed/openclaw-observability-plugin/commit/48eb16dd332d2902aa0891cf1842f6976ebd8c38))
+* **otel:** apply code-review patches to OTLP log bridge (ISI-997) ([31a885d](https://github.com/henrikrexed/openclaw-observability-plugin/commit/31a885d4fd9e3eb853ecca97c1875490e046824b))
+* **otel:** bring GenAI semconv emission back to registry compliance (ISI-993) ([53eda2a](https://github.com/henrikrexed/openclaw-observability-plugin/commit/53eda2ad14034a07e9dba6f87a5967eb304501a9))
+* **otel:** bring GenAI semconv emission back to registry compliance (ISI-993) ([a825927](https://github.com/henrikrexed/openclaw-observability-plugin/commit/a825927635164c021ef79e3e0dc48a448811536b))
+* **otel:** close M1+M2 redaction gaps in content capture (ISI-1000) ([28dd485](https://github.com/henrikrexed/openclaw-observability-plugin/commit/28dd48575b986c8842572c5e922948371ac59342))
+* **otel:** detect preloaded SDK to avoid double provider registration (ISI-996) ([f1999a5](https://github.com/henrikrexed/openclaw-observability-plugin/commit/f1999a5c8f702f2bb1a978847ca9fe6a7fab1009))
+* **otel:** detect preloaded SDK to avoid double provider registration (ISI-996) ([0275ca1](https://github.com/henrikrexed/openclaw-observability-plugin/commit/0275ca11caadbe56969cb095a63ce05900dec3b1))
+* **otel:** filter non-string entries from gen_ai.response.finish_reasons (ISI-993) ([3a29e55](https://github.com/henrikrexed/openclaw-observability-plugin/commit/3a29e553a1b0a350ace9970bf1eb0c42d49b2369))
+* **otel:** harden preloaded SDK detection + add unit tests (ISI-1002) ([9871673](https://github.com/henrikrexed/openclaw-observability-plugin/commit/9871673c03dd4a1c754a73940f73b39014f4090f))
+* **otel:** harden preloaded SDK detection + unit tests (ISI-1002) ([e87598a](https://github.com/henrikrexed/openclaw-observability-plugin/commit/e87598ab1f39ed35090574e9a740df69febb3d7c))
+* **security:** close redaction bypasses found in PR [#29](https://github.com/henrikrexed/openclaw-observability-plugin/issues/29) review (ISI-999) ([af3271e](https://github.com/henrikrexed/openclaw-observability-plugin/commit/af3271ef5140d4a0d44d662e709912fda3f85f23))
+
 ## [Unreleased]
 
 ### Removed
