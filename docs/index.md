@@ -65,20 +65,20 @@ See [Getting Started](getting-started.md) for detailed instructions.
 
 ## What Gets Captured
 
-### Official Plugin
+### Official Plugin (`diagnostics-otel`, built into the Gateway)
 
 | Signal | Data |
 |--------|------|
-| **Metrics** | `openclaw.tokens`, `openclaw.cost.usd`, `openclaw.run.duration_ms`, `openclaw.webhook.*`, `openclaw.message.*`, `openclaw.queue.*`, `openclaw.session.*` |
+| **Metrics** | `openclaw.tokens`, `openclaw.cost.usd`, `openclaw.run.duration_ms`, `openclaw.webhook.*`, `openclaw.message.*`, `openclaw.queue.*`, `openclaw.session.*` (all emitted by `diagnostics-otel`, not by this plugin) |
 | **Traces** | Model usage, webhook processing, message processing, stuck sessions |
 | **Logs** | All Gateway logs with severity, subsystem, code location |
 
-### Custom Plugin (Additional)
+### Custom Plugin (This Repo)
 
 | Signal | Data |
 |--------|------|
 | **Traces** | `openclaw.request` → `openclaw.agent.turn` → `tool.*` (connected hierarchy) |
-| **Metrics** | `openclaw.llm.tokens.*`, `openclaw.tool.calls`, `openclaw.session.resets` |
+| **Metrics** | `openclaw.llm.tokens.{total,prompt,completion}`, `openclaw.llm.cost.usd`, `openclaw.tool.calls`, `openclaw.session.resets`, plus the OTel stable `gen_ai.*` set |
 
 ## Trace Structure Comparison
 

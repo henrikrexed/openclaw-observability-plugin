@@ -89,25 +89,36 @@ openclaw gateway restart
 1. Go to **Explore** → **Metrics**
 2. Search for `openclaw.`
 3. Available metrics:
-   - `openclaw.tokens` — Token usage
-   - `openclaw.cost.usd` — Cost tracking
+
+**From this plugin (`openclaw-observability`):**
+   - `openclaw.llm.tokens.total` / `openclaw.llm.tokens.prompt` / `openclaw.llm.tokens.completion` — Token usage by `gen_ai.response.model`
+   - `openclaw.llm.cost.usd` — Estimated model cost by `gen_ai.response.model`
+   - `openclaw.tool.calls` — Tool call counter
+   - `openclaw.session.resets` — Session reset counter
+
+**From the built-in `diagnostics-otel` plugin (only if you also enabled it in `openclaw.json`):**
+   - `openclaw.tokens` — Token usage (emitted by `diagnostics-otel`, not by this plugin)
+   - `openclaw.cost.usd` — Cost tracking (emitted by `diagnostics-otel`, not by this plugin)
    - `openclaw.run.duration_ms` — Agent run times
    - `openclaw.message.*` — Message processing
    - `openclaw.queue.*` — Queue metrics
 
 ### Create Dashboard
 
-Create a dashboard with:
+Create a dashboard with (queries below assume this plugin's metrics):
 
 ```sql
 -- Token usage by model
-timeseries sum(openclaw.tokens), by:{openclaw.model, openclaw.token}
+timeseries sum(openclaw.llm.tokens.total), by:{gen_ai.response.model}
 
 -- Cost over time
-timeseries sum(openclaw.cost.usd), by:{openclaw.model}
+timeseries sum(openclaw.llm.cost.usd), by:{gen_ai.response.model}
 
--- Agent run duration
-timeseries avg(openclaw.run.duration_ms), by:{openclaw.model}
+-- Agent turn duration (span attribute, query via spans)
+fetch spans
+| filter span.name == "openclaw.agent.turn"
+| summarize avg_duration = avg(openclaw.agent.duration_ms),
+    by:{gen_ai.response.model}
 ```
 
 ### View Logs
@@ -118,20 +129,22 @@ timeseries avg(openclaw.run.duration_ms), by:{openclaw.model}
 
 ## Example DQL Queries
 
+> The queries below target spans/metrics emitted by **this** plugin. If you only have the built-in `diagnostics-otel` plugin enabled, you'll need to swap `openclaw.llm.*` for `openclaw.tokens` / `openclaw.cost.usd` and adjust the group-by attribute to `openclaw.model`.
+
 ### Token Usage by Model
 ```sql
-fetch spans
-| filter dt.entity.service == "openclaw-gateway"
-| summarize tokens = sum(openclaw.tokens.total), by:{openclaw.model}
-| sort tokens desc
+timeseries tokens = sum(openclaw.llm.tokens.total),
+  by:{gen_ai.response.model}
+| sort arrayLast(tokens) desc
 ```
 
-### Average Run Duration
+### Average Agent Turn Duration
 ```sql
 fetch spans
 | filter dt.entity.service == "openclaw-gateway"
-| filter matchesPhrase(span.name, "model")
-| summarize avg_duration = avg(openclaw.run.duration_ms)
+| filter span.name == "openclaw.agent.turn"
+| summarize avg_duration = avg(openclaw.agent.duration_ms),
+    by:{gen_ai.response.model}
 ```
 
 ### Error Rate
