@@ -171,6 +171,20 @@ export interface OtelCounters {
   subagentSpawns: Counter;
   /** Sub-agent completion events */
   subagentEnded: Counter;
+  /** Queue lane enqueue events (ISI-1017) */
+  queueLaneEnqueues: Counter;
+  /** Queue lane dequeue events (ISI-1017) */
+  queueLaneDequeues: Counter;
+  /** Session created events (ISI-1017) */
+  sessionCreated: Counter;
+  /** Session resumed events (ISI-1017) */
+  sessionResumed: Counter;
+  /** Session stuck events (ISI-1017) */
+  sessionStuck: Counter;
+  /** Session long-running events (ISI-1017) */
+  sessionLongRunning: Counter;
+  /** Session stalled events (ISI-1017) */
+  sessionStalled: Counter;
 }
 
 export interface OtelHistograms {
@@ -190,11 +204,15 @@ export interface OtelHistograms {
   cronDuration: Histogram;
   /** Sub-agent duration in ms */
   subagentDuration: Histogram;
+  /** Queue wait time in ms (ISI-1017) */
+  queueWaitMs: Histogram;
 }
 
 export interface OtelGauges {
   /** Currently active sessions */
   activeSessions: UpDownCounter;
+  /** Queue depth per channel (ISI-1017) */
+  queueDepth: UpDownCounter;
 }
 
 // ── Init ────────────────────────────────────────────────────────────
@@ -411,6 +429,36 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       description: "Total sub-agent completion events",
       unit: "events",
     }),
+    // Queue metrics (ISI-1017)
+    queueLaneEnqueues: meter.createCounter("openclaw.queue.lane.enqueues", {
+      description: "Total queue enqueue events per lane",
+      unit: "events",
+    }),
+    queueLaneDequeues: meter.createCounter("openclaw.queue.lane.dequeues", {
+      description: "Total queue dequeue events per lane",
+      unit: "events",
+    }),
+    // Session state metrics (ISI-1017)
+    sessionCreated: meter.createCounter("openclaw.session.created", {
+      description: "Total new session created events",
+      unit: "events",
+    }),
+    sessionResumed: meter.createCounter("openclaw.session.resumed", {
+      description: "Total session resumed events",
+      unit: "events",
+    }),
+    sessionStuck: meter.createCounter("openclaw.session.stuck", {
+      description: "Total stuck session events",
+      unit: "events",
+    }),
+    sessionLongRunning: meter.createCounter("openclaw.session.long_running", {
+      description: "Total long-running session events",
+      unit: "events",
+    }),
+    sessionStalled: meter.createCounter("openclaw.session.stalled", {
+      description: "Total stalled session events",
+      unit: "events",
+    }),
   };
 
   const toolDuration = meter.createHistogram("openclaw.tool.duration", {
@@ -445,12 +493,20 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       description: "Sub-agent duration",
       unit: "ms",
     }),
+    queueWaitMs: meter.createHistogram("openclaw.queue.wait_ms", {
+      description: "Queue wait time from message_received to before_model_resolve",
+      unit: "ms",
+    }),
   };
 
   const gauges: OtelGauges = {
     activeSessions: meter.createUpDownCounter("openclaw.sessions.active", {
       description: "Currently active sessions",
       unit: "sessions",
+    }),
+    queueDepth: meter.createUpDownCounter("openclaw.queue.depth", {
+      description: "Pending messages per channel/lane",
+      unit: "messages",
     }),
   };
 
@@ -481,6 +537,17 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       counters.sensitiveFileAccess.add(0, idleAttrs);
       counters.promptInjection.add(0, idleAttrs);
       counters.dangerousCommand.add(0, idleAttrs);
+
+      // Queue counters (ISI-1017)
+      counters.queueLaneEnqueues.add(0, idleAttrs);
+      counters.queueLaneDequeues.add(0, idleAttrs);
+
+      // Session state counters (ISI-1017)
+      counters.sessionCreated.add(0, idleAttrs);
+      counters.sessionResumed.add(0, idleAttrs);
+      counters.sessionStuck.add(0, idleAttrs);
+      counters.sessionLongRunning.add(0, idleAttrs);
+      counters.sessionStalled.add(0, idleAttrs);
     } catch {
       // Never let metric heartbeat errors affect the gateway
     }

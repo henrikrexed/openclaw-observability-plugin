@@ -154,3 +154,16 @@ export const OPENCLAW_SCHEMA_VERSION = "1.3.0";
 // ── Token type values ───────────────────────────────────────────────
 export const TOKEN_TYPE_INPUT = "input";
 export const TOKEN_TYPE_OUTPUT = "output";
+
+
+// ── Queue attribute keys (ISI-1017) ───────────────────────────────
+export const OC_QUEUE_CHANNEL = "openclaw.queue.channel";
+export const OC_QUEUE_LANE = "openclaw.queue.lane";
+export const OC_QUEUE_WAIT_MS = "openclaw.queue.wait_ms";
+export const OC_QUEUE_DEPTH = "openclaw.queue.depth";
+
+// ── Session state attribute keys (ISI-1017) ───────────────────────
+export const OC_SESSION_STATE = "openclaw.session.state";
+export const OC_SESSION_AGE_MS = "openclaw.session.age_ms";
+export const OC_SESSION_LAST_ACTIVITY_MS = "openclaw.session.last_activity_ms";
+export const OC_SESSION_HEALTH_STATUS = "openclaw.session.health_status";

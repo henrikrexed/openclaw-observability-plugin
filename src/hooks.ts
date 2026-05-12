@@ -93,6 +93,14 @@ import {
   OC_CRON_SUCCESS,
   OC_CRON_AGENT_ID,
   ATTR_USER_ID,
+  OC_QUEUE_CHANNEL,
+  OC_QUEUE_LANE,
+  OC_QUEUE_WAIT_MS,
+  OC_QUEUE_DEPTH,
+  OC_SESSION_STATE,
+  OC_SESSION_AGE_MS,
+  OC_SESSION_LAST_ACTIVITY_MS,
+  OC_SESSION_HEALTH_STATUS,
 } from "./semconv.js";
 
 const CODE_NS = "openclaw.otel.hooks";
@@ -246,7 +254,7 @@ export function registerHooks(
       try {
         const tel = getTelemetry();
         if (!tel) return;
-        const { tracer, counters } = tel;
+        const { tracer, counters, gauges, histograms } = tel;
         const securityCounters = buildSecurityCounters(tel);
 
         const channel = event?.channel || "unknown";
@@ -308,6 +316,17 @@ export function registerHooks(
         counters.messagesReceived.add(1, {
           "openclaw.message.channel": channel,
         });
+
+        // ISI-1017: Queue metrics — message enqueued
+        counters.queueLaneEnqueues.add(1, {
+          [OC_QUEUE_CHANNEL]: channel,
+          [OC_QUEUE_LANE]: channel,
+        });
+        gauges.queueDepth.add(1, {
+          [OC_QUEUE_CHANNEL]: channel,
+          [OC_QUEUE_LANE]: channel,
+        });
+        store.incrementPendingMessage(sessionKey, channel);
 
         logger.debug?.(`[otel] Root span started for session=${sessionKey}`);
       } catch {
@@ -377,6 +396,18 @@ export function registerHooks(
         gauges.activeSessions.add(1, {
           "openclaw.session.channel": channel,
         });
+
+        // ISI-1017: Session state transition counters
+        if (event?.resumedFrom) {
+          counters.sessionResumed.add(1, {
+            "openclaw.session.channel": channel,
+            "openclaw.session.resumed_from": event.resumedFrom,
+          });
+        } else {
+          counters.sessionCreated.add(1, {
+            "openclaw.session.channel": channel,
+          });
+        }
 
         logger.debug?.(`[otel] Session span started: session=${sessionKey}, agent=${agentId}`);
       } catch {
@@ -458,7 +489,7 @@ export function registerHooks(
       try {
         const tel = getTelemetry();
         if (!tel) return undefined;
-        const { tracer } = tel;
+        const { tracer, counters, gauges, histograms } = tel;
 
         const sessionKey = ctx?.sessionKey || "unknown";
         const agentId = ctx?.agentId || "unknown";
@@ -510,6 +541,27 @@ export function registerHooks(
 
         // Register in activeAgentSpans for diagnostics integration
         activeAgentSpans.set(sessionKey, agentSpan);
+
+        // ISI-1017: Queue metrics — message dequeued
+        const channel = ctx?.channel || "unknown";
+        const enqueueTime = store.getEnqueueTime(sessionKey);
+        if (enqueueTime) {
+          const waitMs = Date.now() - enqueueTime;
+          tel.histograms.queueWaitMs.record(waitMs, {
+            [OC_QUEUE_CHANNEL]: channel,
+            [OC_QUEUE_LANE]: channel,
+          });
+          store.clearEnqueueTime(sessionKey);
+        }
+        counters.queueLaneDequeues.add(1, {
+          [OC_QUEUE_CHANNEL]: channel,
+          [OC_QUEUE_LANE]: channel,
+        });
+        gauges.queueDepth.add(-1, {
+          [OC_QUEUE_CHANNEL]: channel,
+          [OC_QUEUE_LANE]: channel,
+        });
+        store.decrementPendingMessage(sessionKey, channel);
 
         logger.debug?.(`[otel] Agent turn span started: agent=${agentId}, session=${sessionKey}`);
       } catch {
@@ -1015,7 +1067,7 @@ export function registerHooks(
       try {
         const tel = getTelemetry();
         if (!tel) return undefined;
-        const { tracer, counters } = tel;
+        const { tracer, counters, gauges, histograms } = tel;
 
         const toolName = event?.toolName || "unknown";
         const toolCallId = event?.toolCallId || "";
@@ -1237,7 +1289,7 @@ export function registerHooks(
       try {
         const tel = getTelemetry();
         if (!tel) return undefined;
-        const { tracer, counters } = tel;
+        const { tracer, counters, gauges, histograms } = tel;
         const securityCounters = buildSecurityCounters(tel);
 
         const toolName = event?.toolName || "unknown";
@@ -1413,7 +1465,7 @@ export function registerHooks(
       try {
         const tel = getTelemetry();
         if (!tel) return undefined;
-        const { tracer, counters } = tel;
+        const { tracer, counters, gauges, histograms } = tel;
 
         const sessionKey = event?.sessionKey || ctx?.sessionKey || "unknown";
         const channel = event?.channel || ctx?.channel || "unknown";
@@ -1537,7 +1589,7 @@ export function registerHooks(
       try {
         const tel = getTelemetry();
         if (!tel) return undefined;
-        const { tracer, counters } = tel;
+        const { tracer, counters, gauges, histograms } = tel;
 
         const sessionKey = event?.sessionKey || ctx?.sessionKey || "unknown";
         const agentId = event?.agentId || ctx?.agentId || "unknown";
@@ -1871,7 +1923,7 @@ export function registerHooks(
       try {
         const tel = getTelemetry();
         if (!tel) return undefined;
-        const { tracer, counters } = tel;
+        const { tracer, counters, gauges, histograms } = tel;
 
         const parentSessionKey = ctx?.sessionKey || event?.parentSessionKey || "unknown";
         const childSessionKey = event?.childSessionKey || event?.sessionKey || "unknown";
@@ -2079,7 +2131,7 @@ export function registerHooks(
       try {
         const tel = getTelemetry();
         if (!tel) return undefined;
-        const { tracer, counters } = tel;
+        const { tracer, counters, gauges, histograms } = tel;
 
         const jobName = event?.jobName || event?.name || "unknown";
         const action = event?.action || event?.changeType || "unknown";
@@ -2243,7 +2295,7 @@ export function registerHooks(
       try {
         const tel = getTelemetry();
         if (!tel) return;
-        const { tracer, counters } = tel;
+        const { tracer, counters, gauges, histograms } = tel;
 
         const action = event?.action || "unknown";
         const sessionKey = event?.sessionKey || "unknown";
@@ -2328,7 +2380,102 @@ export function registerHooks(
     }
   }, 60_000);
 
+  // ── Session health sweeper (ISI-1017) ────────────────────────────
+  // Periodic check for stuck, long-running, and stalled sessions.
+  const STUCK_THRESHOLD_MS = 5 * 60 * 1000;       // 5 min
+  const LONG_RUNNING_THRESHOLD_MS = 30 * 60 * 1000; // 30 min
+  const STALLED_THRESHOLD_MS = 10 * 60 * 1000;      // 10 min
+
+  const healthSweeperInterval = setInterval(() => {
+    try {
+      const tel = getTelemetry();
+      if (!tel) return;
+      const { tracer, counters, gauges, histograms } = tel;
+      const now = Date.now();
+
+      for (const [sessionKey, sessionCtx] of store.getAllSessions()) {
+        if (!sessionCtx) continue;
+        const channel = sessionCtx.channel || "unknown";
+        const ageMs = now - sessionCtx.startedAt;
+        const lastActivityMs = sessionCtx.lastActivityAt
+          ? now - sessionCtx.lastActivityAt
+          : ageMs;
+
+        // Stuck: active agent turn older than threshold
+        const activeTurn = store.getActiveTurn(sessionKey);
+        const turnAgeMs = activeTurn ? now - activeTurn.startedAt : 0;
+        if (turnAgeMs > STUCK_THRESHOLD_MS) {
+          counters.sessionStuck.add(1, {
+            "openclaw.session.channel": channel,
+            [OC_SESSION_STATE]: "stuck",
+          });
+          const healthSpan = tracer.startSpan("openclaw.session.health_check", {
+            kind: SpanKind.INTERNAL,
+            attributes: {
+              [GEN_AI_CONVERSATION_ID]: sessionKey,
+              [OC_SESSION_HEALTH_STATUS]: "stuck",
+              [OC_SESSION_AGE_MS]: ageMs,
+              [OC_SESSION_LAST_ACTIVITY_MS]: lastActivityMs,
+              "openclaw.session.channel": channel,
+              ...codeAttrs("healthSweeper"),
+            },
+          });
+          healthSpan.setStatus({ code: SpanStatusCode.ERROR, message: "Session stuck — active turn exceeded threshold" });
+          healthSpan.end();
+          logger.debug?.(`[otel] Session health: stuck session=${sessionKey}, turnAge=${turnAgeMs}ms`);
+        }
+
+        // Long-running: total session age exceeds threshold
+        if (ageMs > LONG_RUNNING_THRESHOLD_MS) {
+          counters.sessionLongRunning.add(1, {
+            "openclaw.session.channel": channel,
+            [OC_SESSION_STATE]: "long_running",
+          });
+          const healthSpan = tracer.startSpan("openclaw.session.health_check", {
+            kind: SpanKind.INTERNAL,
+            attributes: {
+              [GEN_AI_CONVERSATION_ID]: sessionKey,
+              [OC_SESSION_HEALTH_STATUS]: "long_running",
+              [OC_SESSION_AGE_MS]: ageMs,
+              [OC_SESSION_LAST_ACTIVITY_MS]: lastActivityMs,
+              "openclaw.session.channel": channel,
+              ...codeAttrs("healthSweeper"),
+            },
+          });
+          healthSpan.setStatus({ code: SpanStatusCode.OK });
+          healthSpan.end();
+          logger.debug?.(`[otel] Session health: long-running session=${sessionKey}, age=${ageMs}ms`);
+        }
+
+        // Stalled: no activity for threshold
+        if (lastActivityMs > STALLED_THRESHOLD_MS) {
+          counters.sessionStalled.add(1, {
+            "openclaw.session.channel": channel,
+            [OC_SESSION_STATE]: "stalled",
+          });
+          const healthSpan = tracer.startSpan("openclaw.session.health_check", {
+            kind: SpanKind.INTERNAL,
+            attributes: {
+              [GEN_AI_CONVERSATION_ID]: sessionKey,
+              [OC_SESSION_HEALTH_STATUS]: "stalled",
+              [OC_SESSION_AGE_MS]: ageMs,
+              [OC_SESSION_LAST_ACTIVITY_MS]: lastActivityMs,
+              "openclaw.session.channel": channel,
+              ...codeAttrs("healthSweeper"),
+            },
+          });
+          healthSpan.setStatus({ code: SpanStatusCode.ERROR, message: "Session stalled — no activity exceeded threshold" });
+          healthSpan.end();
+          logger.debug?.(`[otel] Session health: stalled session=${sessionKey}, lastActivity=${lastActivityMs}ms`);
+        }
+      }
+    } catch {
+      // Never let health sweeper errors affect the gateway
+    }
+  }, 30_000);
+
   return () => {
     clearInterval(cleanupInterval);
+    clearInterval(healthSweeperInterval);
   };
 }

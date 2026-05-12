@@ -29,6 +29,12 @@ export interface SessionContext {
   startedAt: number;
   requestCount: number;
   channel?: string;
+  /** Last activity timestamp (ISI-1017) */
+  lastActivityAt?: number;
+  /** Pending message count per channel for queue depth tracking (ISI-1017) */
+  pendingMessages?: Map<string, number>;
+  /** Timestamp when the last message was enqueued for queue wait tracking (ISI-1017) */
+  enqueueTime?: number;
 }
 
 export interface RequestContext {
@@ -317,6 +323,73 @@ export class TraceContextStore {
       turn.modelCallSpan = span;
       turn.modelCallStartTime = startTime;
     }
+  }
+
+  // ── Queue tracking (ISI-1017) ─────────────────────────────────────
+
+  incrementPendingMessage(sessionKey: string, channel: string): void {
+    const session = this.getOrCreateSession(sessionKey);
+    if (!session.pendingMessages) {
+      session.pendingMessages = new Map();
+    }
+    const current = session.pendingMessages.get(channel) || 0;
+    session.pendingMessages.set(channel, current + 1);
+    session.lastActivityAt = Date.now();
+    session.enqueueTime = Date.now();
+  }
+
+  decrementPendingMessage(sessionKey: string, channel: string): number {
+    const session = this.sessions.get(sessionKey);
+    if (!session || !session.pendingMessages) return 0;
+    const current = session.pendingMessages.get(channel) || 0;
+    const next = Math.max(0, current - 1);
+    session.pendingMessages.set(channel, next);
+    session.lastActivityAt = Date.now();
+    return next;
+  }
+
+  getQueueDepth(sessionKey: string, channel: string): number {
+    const session = this.sessions.get(sessionKey);
+    if (!session || !session.pendingMessages) return 0;
+    return session.pendingMessages.get(channel) || 0;
+  }
+
+  getQueueDepthAll(): Map<string, number> {
+    const result = new Map<string, number>();
+    for (const [sessionKey, session] of this.sessions) {
+      if (session.pendingMessages) {
+        const channel = session.channel || "unknown";
+        const depth = session.pendingMessages.get(channel) || 0;
+        result.set(channel, (result.get(channel) || 0) + depth);
+      }
+    }
+    return result;
+  }
+
+  updateLastActivity(sessionKey: string): void {
+    const session = this.sessions.get(sessionKey);
+    if (session) {
+      session.lastActivityAt = Date.now();
+    }
+  }
+
+  getLastActivity(sessionKey: string): number | undefined {
+    return this.sessions.get(sessionKey)?.lastActivityAt;
+  }
+
+  getEnqueueTime(sessionKey: string): number | undefined {
+    return this.sessions.get(sessionKey)?.enqueueTime;
+  }
+
+  clearEnqueueTime(sessionKey: string): void {
+    const session = this.sessions.get(sessionKey);
+    if (session) {
+      session.enqueueTime = undefined;
+    }
+  }
+
+  getAllSessions(): Map<string, SessionContext> {
+    return this.sessions;
   }
 
   // ── Cleanup ───────────────────────────────────────────────────────
