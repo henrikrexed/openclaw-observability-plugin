@@ -45,6 +45,7 @@ import {
   type SecurityCounters,
 } from "./security.js";
 import { TraceContextStore } from "./trace-context-store.js";
+import { injectTraceContext, extractTraceContext } from "./propagation.js";
 import {
   GEN_AI_AGENT_ID,
   GEN_AI_AGENT_NAME,
@@ -295,8 +296,28 @@ export function registerHooks(
           messageText,
         );
 
+        // ISI-1021: Extract W3C trace context from incoming message metadata
+        // (for subagent sessions that were spawned with traceparent injected).
+        const incomingTraceparent = event?.traceContext?.traceparent || event?.metadata?.traceparent;
+        const incomingTracestate = event?.traceContext?.tracestate || event?.metadata?.tracestate;
+        let parentContext = context.active();
+        if (incomingTraceparent) {
+          const extracted = extractTraceContext({
+            traceparent: incomingTraceparent,
+            tracestate: incomingTracestate,
+          });
+          if (extracted) {
+            parentContext = extracted;
+            rootSpan.addLink({
+              context: trace.getSpanContext(extracted)!,
+              attributes: { "openclaw.link.type": "subagent_child" },
+            });
+            logger.debug?.(`[otel] Extracted traceparent from subagent session: ${incomingTraceparent}`);
+          }
+        }
+
         // Store the context so child spans can reference it
-        const rootContext = trace.setSpan(context.active(), rootSpan);
+        const rootContext = trace.setSpan(parentContext, rootSpan);
 
         store.setActiveContext(sessionKey, {
           rootSpan,
@@ -1908,6 +1929,18 @@ export function registerHooks(
         );
 
         store.linkSubAgent(childSessionKey, parentSessionKey);
+
+        // ISI-1021: Inject W3C trace context into child session metadata
+        // so the subagent can extract it and continue the trace.
+        const traceHeaders: Record<string, string> = {};
+        injectTraceContext(traceHeaders, context.active());
+        if (traceHeaders.traceparent && event.childSession) {
+          event.childSession.traceContext = {
+            traceparent: traceHeaders.traceparent,
+            tracestate: traceHeaders.tracestate,
+          };
+          logger.debug?.(`[otel] Injected traceparent into child session: ${traceHeaders.traceparent}`);
+        }
 
         if (store.getActiveContext(parentSessionKey)?.agentSpan) {
           const parentSpan = store.getActiveContext(parentSessionKey)!.agentSpan!;
