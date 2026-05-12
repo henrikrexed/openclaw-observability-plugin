@@ -187,6 +187,20 @@ export async function registerDiagnosticsListener(
       counters.tokensTotal.add(usage.total, metricAttrs);
     }
 
+    // ISI-1018: Token breakdown by type (system, user, tool_result, skill)
+    if (usage.system) {
+      counters.tokensSystem.add(usage.system, metricAttrs);
+    }
+    if (usage.user) {
+      counters.tokensUser.add(usage.user, metricAttrs);
+    }
+    if (usage.toolResult) {
+      counters.tokensToolResult.add(usage.toolResult, metricAttrs);
+    }
+    if (usage.skill) {
+      counters.tokensSkill.add(usage.skill, metricAttrs);
+    }
+
     // Record cost metric
     if (typeof costUsd === "number" && costUsd > 0) {
       telemetry.meter.createCounter("openclaw.llm.cost.usd", {

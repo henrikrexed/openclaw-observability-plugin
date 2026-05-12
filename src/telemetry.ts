@@ -185,6 +185,14 @@ export interface OtelCounters {
   livenessWarnings: Counter;
   /** Diagnostic heartbeat events */
   diagnosticHeartbeats: Counter;
+  /** System prompt tokens */
+  tokensSystem: Counter;
+  /** User message tokens */
+  tokensUser: Counter;
+  /** Tool result tokens */
+  tokensToolResult: Counter;
+  /** Skill tokens */
+  tokensSkill: Counter;
 }
 
 export interface OtelHistograms {
@@ -220,6 +228,8 @@ export interface OtelHistograms {
   gatewayCpuCoreRatio: Histogram;
   /** Gateway work queued */
   gatewayWorkQueued: Histogram;
+  /** Context build duration in ms */
+  contextBuildDuration: Histogram;
 }
 
 export interface OtelGauges {
@@ -476,6 +486,23 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       description: "Total diagnostic heartbeat events",
       unit: "events",
     }),
+    // Token breakdown by type (ISI-1018)
+    tokensSystem: meter.createCounter("openclaw.llm.tokens.system", {
+      description: "System prompt tokens",
+      unit: "tokens",
+    }),
+    tokensUser: meter.createCounter("openclaw.llm.tokens.user", {
+      description: "User message tokens",
+      unit: "tokens",
+    }),
+    tokensToolResult: meter.createCounter("openclaw.llm.tokens.tool_result", {
+      description: "Tool result tokens",
+      unit: "tokens",
+    }),
+    tokensSkill: meter.createCounter("openclaw.llm.tokens.skill", {
+      description: "Skill tokens",
+      unit: "tokens",
+    }),
   };
 
   const toolDuration = meter.createHistogram("openclaw.tool.duration", {
@@ -544,6 +571,11 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     gatewayWorkQueued: meter.createHistogram("openclaw.gateway.work_queued", {
       description: "Gateway work queued",
       unit: "items",
+    }),
+    // Context build duration (ISI-1018)
+    contextBuildDuration: meter.createHistogram("openclaw.context.build_duration", {
+      description: "Context build duration",
+      unit: "ms",
     }),
   };
 
