@@ -191,7 +191,7 @@
     "15": {
       "type": "data",
       "title": "Tool Call Frequency",
-      "query": "fetch spans\n| filter matchesPhrase(span.name, \"tool.\")\n| summarize calls = count(), by:{span.name}\n| sort calls desc\n| limit 20",
+      "query": "fetch spans\n| filter service.name == \"openclaw-gateway\" and startsWith(span.name, \"execute_tool \")\n| summarize calls = count(), by:{span.name}\n| sort calls desc\n| limit 20",
       "visualization": "barChart",
       "visualizationSettings": {
         "chartSettings": {
@@ -207,7 +207,7 @@
     "16": {
       "type": "data",
       "title": "Avg Tool Duration (Top 10)",
-      "query": "fetch spans\n| filter matchesPhrase(span.name, \"tool.\")\n| summarize avg_ms = avg(duration / 1000000), by:{span.name}\n| sort avg_ms desc\n| limit 10",
+      "query": "fetch spans\n| filter service.name == \"openclaw-gateway\" and startsWith(span.name, \"execute_tool \")\n| fieldsAdd duration_ms = toDouble(duration) / 1000000\n| summarize avg_ms = avg(duration_ms), by:{span.name}\n| sort avg_ms desc\n| limit 10",
       "visualization": "barChart"
     },
     "17": {
@@ -295,6 +295,111 @@
       "title": "Recent Security Incidents",
       "query": "fetch spans\n| filter security.event.detected == true\n| fields timestamp, security.event.detection, security.event.severity, security.event.description, openclaw.session.key\n| sort timestamp desc\n| limit 20",
       "visualization": "table"
+    },
+    "26": {
+      "type": "markdown",
+      "title": "",
+      "content": "## 🧪 V3 spans & GenAI metrics (otel-observability plugin)\n\nThese tiles read from the V3 span structure (`chat <model>`, `execute_tool <name>`, `openclaw.dispatch.prepare`) and the stable OTel GenAI metrics (`gen_ai.client.token.usage`, `gen_ai.client.operation.duration`) emitted by the `openclaw-o11y-plugin`. The token-charts above (`openclaw.tokens`) still source from the built-in `diagnostics-otel` plugin."
+    },
+    "27": {
+      "type": "data",
+      "title": "Top Tools by Latency (V3 execute_tool spans)",
+      "query": "fetch spans\n| filter service.name == \"openclaw-gateway\" and startsWith(span.name, \"execute_tool \")\n| fieldsAdd duration_ms = toDouble(duration) / 1000000\n| summarize avg_ms = avg(duration_ms), p95_ms = percentile(duration_ms, 95), count = count(), by:{span.name}\n| sort count desc\n| limit 15",
+      "queryConfig": {
+        "additionalFilters": {},
+        "datatype": "logs",
+        "version": "4.3.1"
+      },
+      "visualization": "table",
+      "visualizationSettings": {
+        "table": {
+          "rowDensity": "comfortable"
+        }
+      }
+    },
+    "28": {
+      "type": "data",
+      "title": "Tool Call Volume Over Time (V3)",
+      "query": "fetch spans\n| filter service.name == \"openclaw-gateway\" and startsWith(span.name, \"execute_tool \")\n| makeTimeseries calls = count(), by:{span.name}, interval:5m",
+      "queryConfig": {
+        "additionalFilters": {},
+        "datatype": "logs",
+        "version": "4.3.1"
+      },
+      "visualization": "lineChart",
+      "visualizationSettings": {
+        "chartSettings": {
+          "gapPolicy": "connect",
+          "legend": { "position": "bottom" }
+        }
+      }
+    },
+    "29": {
+      "type": "data",
+      "title": "LLM Call Duration by Model (V3 chat spans)",
+      "query": "fetch spans\n| filter service.name == \"openclaw-gateway\" and startsWith(span.name, \"chat \")\n| fieldsAdd duration_ms = toDouble(duration) / 1000000\n| summarize avg_ms = avg(duration_ms), p95_ms = percentile(duration_ms, 95), count = count(), by:{`gen_ai.request.model`}\n| sort count desc\n| limit 20",
+      "queryConfig": {
+        "additionalFilters": {},
+        "datatype": "logs",
+        "version": "4.3.1"
+      },
+      "visualization": "table",
+      "visualizationSettings": {
+        "table": {
+          "rowDensity": "comfortable"
+        }
+      }
+    },
+    "30": {
+      "type": "data",
+      "title": "Token Usage by Type & Model (gen_ai stable metric)",
+      "query": "timeseries token_usage = sum(gen_ai.client.token.usage), by:{gen_ai.token.type, gen_ai.request.model}, interval:10m",
+      "queryConfig": {
+        "additionalFilters": {},
+        "datatype": "metrics",
+        "version": "4.3.1"
+      },
+      "visualization": "areaChart",
+      "visualizationSettings": {
+        "chartSettings": {
+          "gapPolicy": "connect",
+          "legend": { "position": "bottom" }
+        }
+      }
+    },
+    "31": {
+      "type": "data",
+      "title": "LLM Operation Duration p95 (gen_ai metric)",
+      "query": "timeseries p95 = percentile(gen_ai.client.operation.duration, 95, rollup:avg), by:{gen_ai.request.model}, interval:5m",
+      "queryConfig": {
+        "additionalFilters": {},
+        "datatype": "metrics",
+        "version": "4.3.1"
+      },
+      "visualization": "lineChart",
+      "visualizationSettings": {
+        "chartSettings": {
+          "gapPolicy": "connect",
+          "legend": { "position": "bottom" }
+        }
+      }
+    },
+    "32": {
+      "type": "data",
+      "title": "Dispatch Phase Duration (openclaw.dispatch.prepare)",
+      "query": "fetch spans\n| filter service.name == \"openclaw-gateway\" and span.name == \"openclaw.dispatch.prepare\"\n| fieldsAdd duration_ms = toDouble(duration) / 1000000\n| makeTimeseries avg_ms = avg(duration_ms), p95_ms = percentile(duration_ms, 95), interval:5m",
+      "queryConfig": {
+        "additionalFilters": {},
+        "datatype": "logs",
+        "version": "4.3.1"
+      },
+      "visualization": "lineChart",
+      "visualizationSettings": {
+        "chartSettings": {
+          "gapPolicy": "connect",
+          "legend": { "position": "bottom" }
+        }
+      }
     }
   },
   "layouts": {
@@ -323,6 +428,13 @@
     "22": { "x": 14, "y": 46, "w": 10, "h": 6 },
     "23": { "x": 0, "y": 52, "w": 24, "h": 1 },
     "24": { "x": 0, "y": 53, "w": 14, "h": 6 },
-    "25": { "x": 14, "y": 53, "w": 10, "h": 6 }
+    "25": { "x": 14, "y": 53, "w": 10, "h": 6 },
+    "26": { "x": 0, "y": 59, "w": 24, "h": 2 },
+    "27": { "x": 0, "y": 61, "w": 12, "h": 6 },
+    "28": { "x": 12, "y": 61, "w": 12, "h": 6 },
+    "29": { "x": 0, "y": 67, "w": 12, "h": 6 },
+    "30": { "x": 12, "y": 67, "w": 12, "h": 6 },
+    "31": { "x": 0, "y": 73, "w": 12, "h": 4 },
+    "32": { "x": 12, "y": 73, "w": 12, "h": 4 }
   }
 }

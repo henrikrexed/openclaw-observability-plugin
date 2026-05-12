@@ -17,6 +17,7 @@ Pre-built Dynatrace dashboard JSON for monitoring OpenClaw AI agent operations.
 | 5 | **Issue Flow** | `paperclip.issues.count` by status, completion rate | Area + line charts |
 | 6 | **Budget Utilization** | `paperclip.budget.utilization` by agent, status table | Line chart + table |
 | 7 | **Security** | `openclaw.security.*` events, recent incidents from spans | Line chart + table |
+| 8 | **V3 spans & GenAI metrics** | `chat <model>` / `execute_tool <name>` / `openclaw.dispatch.prepare` spans + stable `gen_ai.client.*` metrics from `openclaw-o11y-plugin` | Tables + line/area charts |
 
 ### Import
 
