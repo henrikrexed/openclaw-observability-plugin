@@ -193,6 +193,12 @@ export interface OtelCounters {
   tokensToolResult: Counter;
   /** Skill tokens */
   tokensSkill: Counter;
+  /** Webhook received events */
+  webhooksReceived: Counter;
+  /** Webhook processed events */
+  webhooksProcessed: Counter;
+  /** Webhook error events */
+  webhooksErrors: Counter;
 }
 
 export interface OtelHistograms {
@@ -230,6 +236,10 @@ export interface OtelHistograms {
   gatewayWorkQueued: Histogram;
   /** Context build duration in ms */
   contextBuildDuration: Histogram;
+  /** Webhook processing duration in ms */
+  webhookDuration: Histogram;
+  /** Webhook payload size in bytes */
+  webhookPayloadSize: Histogram;
 }
 
 export interface OtelGauges {
@@ -503,6 +513,19 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       description: "Skill tokens",
       unit: "tokens",
     }),
+    // Webhook metrics (ISI-1020)
+    webhooksReceived: meter.createCounter("openclaw.webhooks.received", {
+      description: "Total webhook received events",
+      unit: "events",
+    }),
+    webhooksProcessed: meter.createCounter("openclaw.webhooks.processed", {
+      description: "Total webhook processed events",
+      unit: "events",
+    }),
+    webhooksErrors: meter.createCounter("openclaw.webhooks.errors", {
+      description: "Total webhook error events",
+      unit: "errors",
+    }),
   };
 
   const toolDuration = meter.createHistogram("openclaw.tool.duration", {
@@ -576,6 +599,15 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     contextBuildDuration: meter.createHistogram("openclaw.context.build_duration", {
       description: "Context build duration",
       unit: "ms",
+    }),
+    // Webhook histograms (ISI-1020)
+    webhookDuration: meter.createHistogram("openclaw.webhook.duration", {
+      description: "Webhook processing duration",
+      unit: "ms",
+    }),
+    webhookPayloadSize: meter.createHistogram("openclaw.webhook.payload_size", {
+      description: "Webhook payload size",
+      unit: "bytes",
     }),
   };
 
