@@ -560,6 +560,7 @@ export function registerHooks(
       try {
         const tel = getTelemetry();
         if (!tel) return undefined;
+        const { histograms } = tel;
         const sessionKey = ctx?.sessionKey || "unknown";
         const sessionCtx = store.getActiveContext(sessionKey);
         const agentSpan = sessionCtx?.agentSpan;
@@ -572,6 +573,45 @@ export function registerHooks(
 
         agentSpan.setAttribute("openclaw.prompt.chars", prompt.length);
         agentSpan.setAttribute("openclaw.session.message_count", messagesArr.length);
+
+        // ISI-1018: Context layer and skill usage tracking
+        // Track skills loaded into the context
+        const skills = event?.skills || event?.context?.skills || [];
+        if (Array.isArray(skills) && skills.length > 0) {
+          agentSpan.setAttribute("openclaw.context.skill_count", skills.length);
+          const skillNames = skills
+            .map((s: any) => typeof s === "string" ? s : s?.name || s?.id)
+            .filter(Boolean)
+            .slice(0, 20); // Cap to avoid attribute explosion
+          if (skillNames.length > 0) {
+            agentSpan.setAttribute("openclaw.context.skill_names", skillNames);
+          }
+        }
+
+        // Track context window usage if available
+        const contextLimit = event?.contextLimit || event?.context?.limit;
+        const contextUsed = event?.contextUsed || event?.context?.used;
+        if (typeof contextLimit === "number") {
+          agentSpan.setAttribute("openclaw.context.limit", contextLimit);
+        }
+        if (typeof contextUsed === "number") {
+          agentSpan.setAttribute("openclaw.context.used", contextUsed);
+        }
+        if (
+          typeof contextLimit === "number" &&
+          contextLimit > 0 &&
+          typeof contextUsed === "number"
+        ) {
+          agentSpan.setAttribute("openclaw.context.utilization", contextUsed / contextLimit);
+        }
+
+        // ISI-1018: Context build duration
+        const contextBuildDuration = event?.contextBuildDuration || event?.durationMs;
+        if (typeof contextBuildDuration === "number") {
+          histograms.contextBuildDuration.record(contextBuildDuration, {
+            "openclaw.session.key": sessionKey,
+          });
+        }
 
         // Content capture (ISI-1000).
         captureContentAttribute(
