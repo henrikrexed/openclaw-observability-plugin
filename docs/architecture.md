@@ -87,7 +87,9 @@ Gateway Core                    diagnostics-otel Plugin
 
 ### OTel Signals Created
 
-**Metrics:**
+> Everything in this subsection is produced by the Gateway-built-in `diagnostics-otel` plugin. The custom plugin in this repo (Approach 2 below) emits a different metric set (`openclaw.llm.*` + `gen_ai.*`).
+
+**Metrics (emitted by `diagnostics-otel`):**
 ```
 openclaw.tokens{type="input|output|cache_read|cache_write"}
 openclaw.cost.usd
@@ -106,14 +108,14 @@ openclaw.session.stuck
 openclaw.session.stuck_age_ms
 ```
 
-**Traces:**
+**Traces (emitted by `diagnostics-otel`):**
 - `openclaw.model.usage` — Per LLM call span
 - `openclaw.webhook.processed` — Per webhook span
 - `openclaw.webhook.error` — Error span (with status=ERROR)
 - `openclaw.message.processed` — Per message span
 - `openclaw.session.stuck` — Stuck detection span
 
-**Logs:**
+**Logs (emitted by `diagnostics-otel`):**
 - All Gateway logs as OTel LogRecords
 - Includes severity, subsystem, code location
 
@@ -292,6 +294,24 @@ openclaw.request (root)
             gen_ai.tool.name: "Write"
             openclaw.tool.result_chars: 0
 ```
+
+### OTel Signals Created
+
+**Metrics (emitted by this plugin):**
+```
+openclaw.llm.tokens.total        # counter, by gen_ai.response.model
+openclaw.llm.tokens.prompt       # counter
+openclaw.llm.tokens.completion   # counter
+openclaw.llm.cost.usd            # counter, by gen_ai.response.model
+openclaw.tool.calls              # counter
+openclaw.session.resets          # counter
+```
+
+The OTel-stable `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` are recorded as **span attributes** on the LLM/agent-turn spans (see the trace structure above) — not as separate metric instruments.
+
+**Traces (emitted by this plugin):** see the trace tree above (`openclaw.request` → `openclaw.session` → `openclaw.agent.turn` → child spans).
+
+**Note:** The legacy `openclaw.tokens` / `openclaw.cost.usd` counters are emitted only by the Gateway's built-in `diagnostics-otel` plugin (Approach 1). They are **not** emitted by this plugin.
 
 ---
 

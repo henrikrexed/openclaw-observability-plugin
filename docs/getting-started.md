@@ -41,9 +41,11 @@ openclaw gateway restart
 
 Send a message to your agent and check your backend for:
 
-- **Metrics:** `openclaw.tokens`, `openclaw.cost.usd`, `openclaw.run.duration_ms`
+- **Metrics (emitted by `diagnostics-otel`):** `openclaw.tokens`, `openclaw.cost.usd`, `openclaw.run.duration_ms`
 - **Traces:** `openclaw.model.usage`, `openclaw.message.processed`
 - **Logs:** Gateway logs with severity and code location
+
+> If you also installed Option 2 (this repo's custom plugin), the metrics from the custom plugin are different: `openclaw.llm.tokens.{total,prompt,completion}`, `openclaw.llm.cost.usd`, and the OTel stable `gen_ai.*` set.
 
 ---
 

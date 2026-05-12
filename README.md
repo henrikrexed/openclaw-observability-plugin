@@ -60,7 +60,9 @@ openclaw gateway restart
 
 ### What It Captures
 
-**Metrics:**
+> All metrics in this section are emitted by the Gateway's built-in `diagnostics-otel` plugin — **not** by this repo's custom plugin. The custom plugin emits `openclaw.llm.*` and `gen_ai.*` instead (see Approach 2 below).
+
+**Metrics (from `diagnostics-otel`):**
 - `openclaw.tokens` — Token usage by type (input/output/cache)
 - `openclaw.cost.usd` — Estimated model cost
 - `openclaw.run.duration_ms` — Agent run duration
