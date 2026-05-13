@@ -158,6 +158,19 @@ const otelObservabilityPlugin = {
       { commands: ["otel"] }
     );
 
+    // Subscribe to diagnostic events immediately (not just in start())
+    // so we capture gateway health metrics even if start() isn't called.
+    if (telemetry) {
+      registerDiagnosticsListener(telemetry, logger).then((unsub) => {
+        unsubscribeDiagnostics = unsub;
+        if (hasDiagnosticsSupport()) {
+          logger.info("[otel] ✅ Integrated with OpenClaw diagnostics (cost tracking enabled)");
+        }
+      }).catch((err) => {
+        logger.error(`[otel] Failed to register diagnostics listener: ${String(err)}`);
+      });
+    }
+
     // ── Background service ──────────────────────────────────────────
 
     api.registerService({
@@ -216,17 +229,6 @@ const otelObservabilityPlugin = {
         //    process, so leave it here.
         if (config.traces) {
           await initOpenLLMetry(config, logger);
-        }
-
-        // 2. Subscribe to OpenClaw diagnostic events (model.usage, etc.)
-        //    for cost + accurate token counts. These events are emitted
-        //    from the gateway process, so the listener only needs to
-        //    live there.
-        if (telemetry) {
-          unsubscribeDiagnostics = await registerDiagnosticsListener(telemetry, logger);
-          if (hasDiagnosticsSupport()) {
-            logger.info("[otel] ✅ Integrated with OpenClaw diagnostics (cost tracking enabled)");
-          }
         }
 
         logger.info("[otel] ✅ Observability pipeline active (gateway-side)");
