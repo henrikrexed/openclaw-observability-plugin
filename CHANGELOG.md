@@ -4,6 +4,43 @@ All notable changes to the `@henrikrexed/openclaw-otel-observability` plugin are
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.5.0...v0.6.0) (2026-05-13)
+
+
+### Features
+
+* **dashboard:** add plugin-only dashboard using collected metrics/spans/logs ([b544fa0](https://github.com/henrikrexed/openclaw-observability-plugin/commit/b544fa054df082a270ec002804dabc3af7bf8392))
+
+
+### Bug Fixes
+
+* **dashboard:** add default:0 for cache token types to handle missing data ([0407203](https://github.com/henrikrexed/openclaw-observability-plugin/commit/0407203166c9d1f19b310ff4339afd877cc92afa))
+* **dashboard:** correct hostname filter from openclaw to clawdbot ([c0eee30](https://github.com/henrikrexed/openclaw-observability-plugin/commit/c0eee30e83ba31c313d9f6ce9923c27b27e4757a))
+* **dashboard:** remove cache token types until cache usage occurs ([3661c18](https://github.com/henrikrexed/openclaw-observability-plugin/commit/3661c189666fad11cf572f61b72742ccbed8a0fd))
+* **dashboard:** use system.cpu.utilization instead of manual calculation ([0480930](https://github.com/henrikrexed/openclaw-observability-plugin/commit/04809303dd53caa9a198b622052df25bbfb822ba))
+* **diagnostics:** add debug logging for all diagnostic events ([e2b53f7](https://github.com/henrikrexed/openclaw-observability-plugin/commit/e2b53f72c1619791eb191709c915fc6de6467843))
+* **diagnostics:** add info-level logging for liveness warnings ([659e5e7](https://github.com/henrikrexed/openclaw-observability-plugin/commit/659e5e7f621409219b32ed43ddf67153f1506348))
+* **diagnostics:** add logging to verify onDiagnosticEvent is loaded ([c7863da](https://github.com/henrikrexed/openclaw-observability-plugin/commit/c7863daa8402c8ce56048c49e6511969782073ea))
+* **diagnostics:** prefer internal diagnostic events over SDK wrapper ([af2a5c5](https://github.com/henrikrexed/openclaw-observability-plugin/commit/af2a5c526e15651e164ad4d582fefff3798b83d2))
+* **diagnostics:** remove info-level logging that was causing log spam ([7cf1474](https://github.com/henrikrexed/openclaw-observability-plugin/commit/7cf147414270464136a7da305a96cd7bd71b0229))
+* **diagnostics:** try internal diagnostic events module as fallback ([0605f4f](https://github.com/henrikrexed/openclaw-observability-plugin/commit/0605f4fc82616192147eabc8a7ea3559d25d0e00))
+* **diagnostics:** try multiple paths to load diagnostic events module ([dd728fc](https://github.com/henrikrexed/openclaw-observability-plugin/commit/dd728fcd830551d8381aa8bebdfa922825bc3c63))
+* **diagnostics:** use absolute path for internal diagnostic events module ([918d800](https://github.com/henrikrexed/openclaw-observability-plugin/commit/918d800b10eadf80b70f222a4dec960c652a2f56))
+* **diagnostics:** wire gateway health metrics from diagnostic events ([d0cbbb8](https://github.com/henrikrexed/openclaw-observability-plugin/commit/d0cbbb8a57967ceecb81eea9dc23db5bf8f71e8c))
+* **hooks:** add debug logging for trace context store ([841fe60](https://github.com/henrikrexed/openclaw-observability-plugin/commit/841fe60dfde3c8454519872f1264f3968f338ab0))
+* **hooks:** add error logging to message_received hook ([6a7a822](https://github.com/henrikrexed/openclaw-observability-plugin/commit/6a7a82214fc0332cfac0666b93911738f621ba29))
+* **hooks:** persist TraceContextStore across plugin reloads ([d23fe92](https://github.com/henrikrexed/openclaw-observability-plugin/commit/d23fe92cbb9430859a1937f363a08b4b58a4c331))
+* **hooks:** remove duplicate sessionKey declaration ([20cea91](https://github.com/henrikrexed/openclaw-observability-plugin/commit/20cea9173f9c164f285498b979f11f05288f8af8))
+* **index:** register diagnostics listener at register() time, not start() ([0c567c7](https://github.com/henrikrexed/openclaw-observability-plugin/commit/0c567c780269125a037cdd2cd0b19ec526c5411d))
+* **telemetry:** prevent double-registration breaking span parent chains ([b0684e9](https://github.com/henrikrexed/openclaw-observability-plugin/commit/b0684e9caadbf6f5e69b803af9325b0adfd9d19c))
+* **token-types:** add cache_read and cache_creation token types for gen_ai.client.token.usage histogram ([8f13e05](https://github.com/henrikrexed/openclaw-observability-plugin/commit/8f13e054316071739797f1c0f5f15f3f48d9a3a0))
+
+
+### Reverts
+
+* **dashboard:** hostname is openclaw, not clawdbot ([3f46c1d](https://github.com/henrikrexed/openclaw-observability-plugin/commit/3f46c1d2cb7ff8204683edca839cec6a962726e8))
+* **diagnostics:** remove debug logging and fallback paths ([d1266e5](https://github.com/henrikrexed/openclaw-observability-plugin/commit/d1266e58c1965bf1eab846d866129521095314ec))
+
 ## [0.5.0](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.4.1...v0.5.0) (2026-05-12)
 
 
