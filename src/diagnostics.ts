@@ -103,18 +103,10 @@ export async function registerDiagnosticsListener(
     logger.warn?.("[otel] No diagnostic event source available — using fallback token extraction");
     return () => {};
   }
-  
-  logger.info(`[otel] Using diagnostic event source: ${onInternalDiagnosticEvent ? 'internal' : 'sdk'}`);
-  
-  // Test: emit a test event to verify the listener is working
-  setTimeout(() => {
-    logger.info(`[otel] Test: Checking if diagnostic events are being received...`);
-  }, 5000);
 
   const { counters, histograms } = telemetry;
 
   const unsubscribe = eventSource((evt: any) => {
-    logger.info(`[otel] diagnostic event received: type=${evt?.type}`);
     
     // ISI-1017: Queue events
     if (evt.type === "queue.lane.enqueue") {
@@ -196,7 +188,7 @@ export async function registerDiagnosticsListener(
         histograms.gatewayWorkQueued.record(queued);
       }
 
-      logger.info(
+      logger.debug?.(
         `[otel] diagnostic.liveness.warning: eventLoopDelayP99Ms=${eventLoopDelayP99Ms}, cpuCoreRatio=${cpuCoreRatio}, queued=${queued}`
       );
       return;
