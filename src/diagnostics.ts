@@ -79,9 +79,11 @@ export async function registerDiagnosticsListener(
   await loadSdk();
 
   if (!onDiagnosticEvent) {
-    logger.debug?.("[otel] onDiagnosticEvent not available — using fallback token extraction");
+    logger.warn?.("[otel] onDiagnosticEvent not available — using fallback token extraction");
     return () => {};
   }
+  
+  logger.info(`[otel] onDiagnosticEvent loaded, registering listener...`);
 
   const { counters, histograms } = telemetry;
 
