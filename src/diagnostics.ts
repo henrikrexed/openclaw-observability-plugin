@@ -42,6 +42,21 @@ async function loadSdk(): Promise<void> {
   }
 }
 
+// Direct access to internal diagnostic events (fallback)
+let onInternalDiagnosticEvent: ((listener: (evt: any) => void) => () => void) | null = null;
+
+async function loadInternalDiagnostics(): Promise<void> {
+  if (onInternalDiagnosticEvent) return;
+  try {
+    // Try to load from the internal module directly
+    // @ts-ignore
+    const diag = await import("openclaw/dist/diagnostic-events-CjwOn-Qj.js") as any;
+    onInternalDiagnosticEvent = diag.onInternalDiagnosticEvent || diag.o;
+  } catch {
+    // Internal module not available
+  }
+}
+
 /** Pending usage data waiting to be attached to spans */
 interface PendingUsageData {
   costUsd?: number;
@@ -77,17 +92,21 @@ export async function registerDiagnosticsListener(
 ): Promise<() => void> {
   // Load the SDK if not already loaded
   await loadSdk();
+  await loadInternalDiagnostics();
 
-  if (!onDiagnosticEvent) {
-    logger.warn?.("[otel] onDiagnosticEvent not available — using fallback token extraction");
+  // Use internal diagnostic events if available, otherwise fall back to SDK
+  const eventSource = onInternalDiagnosticEvent || onDiagnosticEvent;
+  
+  if (!eventSource) {
+    logger.warn?.("[otel] No diagnostic event source available — using fallback token extraction");
     return () => {};
   }
   
-  logger.info(`[otel] onDiagnosticEvent loaded, registering listener...`);
+  logger.info(`[otel] Using diagnostic event source: ${onInternalDiagnosticEvent ? 'internal' : 'sdk'}`);
 
   const { counters, histograms } = telemetry;
 
-  const unsubscribe = onDiagnosticEvent((evt: any) => {
+  const unsubscribe = eventSource((evt: any) => {
     logger.info(`[otel] diagnostic event received: type=${evt?.type}`);
     
     // ISI-1017: Queue events
