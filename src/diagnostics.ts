@@ -50,9 +50,9 @@ async function loadInternalDiagnostics(): Promise<void> {
   if (internalLoadAttempted) return;
   internalLoadAttempted = true;
   try {
-    // Try to load from the internal module directly
+    // Try to load from the internal module directly (use absolute path)
     // @ts-ignore
-    const diag = await import("openclaw/dist/diagnostic-events-CjwOn-Qj.js") as any;
+    const diag = await import("/home/hrexed/.npm-global/lib/node_modules/openclaw/dist/diagnostic-events-CjwOn-Qj.js") as any;
     onInternalDiagnosticEvent = diag.onInternalDiagnosticEvent || diag.o;
   } catch {
     // Internal module not available
