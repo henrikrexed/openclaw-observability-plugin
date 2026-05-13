@@ -253,7 +253,23 @@ export interface OtelGauges {
 
 // ── Init ────────────────────────────────────────────────────────────
 
+// Module-level guard to prevent double-registration when the plugin is
+// re-initialized (e.g., hot-reload or multiple register() calls).
+// Each registration would otherwise replace the global TracerProvider,
+// breaking span parent chains and causing orphaned single-span traces.
+let initializedRuntime: TelemetryRuntime | null = null;
+let tracerProviderRef: NodeTracerProvider | null = null;
+
 export function initTelemetry(config: OtelObservabilityConfig, logger: any): TelemetryRuntime {
+  // Idempotent: if we already initialized, reuse the existing runtime.
+  // This prevents tracerProvider.register() from being called multiple
+  // times, which would corrupt the global tracer provider state and
+  // break span parent relationships (manifesting as missing
+  // openclaw.agent.turn spans and single-span traces).
+  if (initializedRuntime) {
+    logger.info("[otel] Reusing existing telemetry runtime (skipping double registration)");
+    return initializedRuntime;
+  }
   const resourceAttrs: Record<string, string> = {
     [ATTR_SERVICE_NAME]: config.serviceName,
     // ISI-995: emit the real plugin version (from openclaw.plugin.json)
@@ -325,7 +341,7 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       }
 
       // SDK v2: pass spanProcessors in constructor (addSpanProcessor was removed)
-      tracerProvider = new NodeTracerProvider({
+      tracerProvider = tracerProviderRef = new NodeTracerProvider({
         resource,
         spanProcessors: [new BatchSpanProcessor(traceExporter)],
         ...(sampler ? { sampler } : {}),
@@ -336,6 +352,7 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       // injectTraceContext/extractTraceContext helpers) propagate
       // `traceparent` across service boundaries by default.
       const propagator = setupGlobalPropagator();
+      tracerProviderRef = tracerProvider;
       tracerProvider.register({ propagator });
 
       const samplingNote =
@@ -668,8 +685,14 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       if (meterProvider) await meterProvider.shutdown();
     } catch (err) {
       logger.error(`[otel] Shutdown error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      // Clear module-level refs so a legitimate restart can re-register.
+      initializedRuntime = null;
+      tracerProviderRef = null;
     }
   };
 
-  return { tracer, meter, counters, histograms, gauges, shutdown };
+  const runtime: TelemetryRuntime = { tracer, meter, counters, histograms, gauges, shutdown };
+  initializedRuntime = runtime;
+  return runtime;
 }

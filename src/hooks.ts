@@ -478,13 +478,19 @@ export function registerHooks(
     (_event: any, ctx: any) => {
       try {
         const tel = getTelemetry();
-        if (!tel) return undefined;
+        logger.info(`[otel] before_model_resolve fired: hasTelemetry=${!!tel}, ctx=${JSON.stringify(ctx)}`);
+        if (!tel) {
+          logger.warn("[otel] before_model_resolve: no telemetry available");
+          return undefined;
+        }
         const { tracer } = tel;
 
         const sessionKey = ctx?.sessionKey || "unknown";
         const agentId = ctx?.agentId || "unknown";
 
         const sessionCtx = store.getActiveContext(sessionKey);
+        logger.info(`[otel] before_model_resolve: sessionKey=${sessionKey}, hasSessionCtx=${!!sessionCtx}`);
+        
         const parentContext = sessionCtx?.rootContext || context.active();
 
         // Create agent turn span as child of root span.
@@ -514,6 +520,7 @@ export function registerHooks(
         );
 
         const agentContext = trace.setSpan(parentContext, agentSpan);
+        logger.info(`[otel] Agent turn span created: spanId=${agentSpan.spanContext().spanId}, isRecording=${agentSpan.isRecording()}`);
 
         // Store agent span context for tool spans
         if (sessionCtx) {
@@ -532,9 +539,9 @@ export function registerHooks(
         // Register in activeAgentSpans for diagnostics integration
         activeAgentSpans.set(sessionKey, agentSpan);
 
-        logger.debug?.(`[otel] Agent turn span started: agent=${agentId}, session=${sessionKey}`);
-      } catch {
-        // Silently ignore
+        logger.info(`[otel] Agent turn span started: agent=${agentId}, session=${sessionKey}`);
+      } catch (err) {
+        logger.error(`[otel] before_model_resolve error: ${err instanceof Error ? err.message : String(err)}`);
       }
 
       // Return undefined — we do not override provider/model.
