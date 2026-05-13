@@ -234,7 +234,7 @@
       "21": {
         "type": "data",
         "title": "CPU Utilization (%)",
-        "query": "timeseries idle=avg(system.cpu.time, filter:{state==\"idle\"}), total=avg(system.cpu.time), filter:{host.name==\"openclaw\"}, interval:5m\n| fieldsAdd cpu_pct = 100 - (idle / total * 100)\n| fieldsRemove idle, total",
+        "query": "timeseries avg(system.cpu.utilization), interval:5m",
         "visualization": "lineChart",
         "visualizationSettings": {
           "chartSettings": {
