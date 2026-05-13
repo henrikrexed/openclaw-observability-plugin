@@ -251,7 +251,8 @@ export function registerHooks(
     "message_received",
     async (event: any, ctx: any) => {
       try {
-        logger.info(`[otel] message_received fired: sessionKey=${event?.sessionKey || ctx?.sessionKey}, channel=${event?.channel}`);
+        const sessionKey = event?.sessionKey || ctx?.sessionKey || "unknown";
+        logger.info(`[otel] message_received fired: sessionKey=${sessionKey}, channel=${event?.channel}, storeSize=${store.activeContextCount}`);
         const tel = getTelemetry();
         if (!tel) return;
         const { tracer, counters } = tel;
@@ -337,7 +338,7 @@ export function registerHooks(
           "openclaw.message.channel": channel,
         });
 
-        logger.debug?.(`[otel] Root span started for session=${sessionKey}`);
+        logger.info(`[otel] Root span started: session=${sessionKey}, spanId=${rootSpan.spanContext().spanId}, storeSize=${store.activeContextCount}`);
       } catch (err) {
         logger.error?.(`[otel] message_received error: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -496,7 +497,7 @@ export function registerHooks(
         const agentId = ctx?.agentId || "unknown";
 
         let sessionCtx = store.getActiveContext(sessionKey);
-        logger.info(`[otel] before_model_resolve: sessionKey=${sessionKey}, hasSessionCtx=${!!sessionCtx}`);
+        logger.info(`[otel] before_model_resolve: sessionKey=${sessionKey}, hasSessionCtx=${!!sessionCtx}, storeSize=${store.activeContextCount}`);
         
         // For heartbeats/cron that don't fire message_received, create a
         // synthetic root span so the trace still has a proper hierarchy.
