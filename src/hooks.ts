@@ -73,6 +73,8 @@ import {
   OP_INVOKE_AGENT,
   TOKEN_TYPE_INPUT,
   TOKEN_TYPE_OUTPUT,
+  TOKEN_TYPE_CACHE_READ,
+  TOKEN_TYPE_CACHE_CREATION,
   CODE_FUNCTION_NAME,
   CODE_FILE_PATH,
   ERROR_TYPE,
@@ -1895,7 +1897,7 @@ export function registerHooks(
             counters.llmRequests.add(1, metricAttrs);
 
             // Stable GenAI token usage histogram (per gen_ai.token.type)
-            histograms.genAiTokenUsage.record(totalInputTokens + cacheReadTokens + cacheWriteTokens, {
+            histograms.genAiTokenUsage.record(totalInputTokens, {
               ...metricAttrs,
               [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_INPUT,
             });
@@ -1903,6 +1905,18 @@ export function registerHooks(
               ...metricAttrs,
               [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_OUTPUT,
             });
+            if (cacheReadTokens > 0) {
+              histograms.genAiTokenUsage.record(cacheReadTokens, {
+                ...metricAttrs,
+                [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_READ,
+              });
+            }
+            if (cacheWriteTokens > 0) {
+              histograms.genAiTokenUsage.record(cacheWriteTokens, {
+                ...metricAttrs,
+                [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_CREATION,
+              });
+            }
           }
 
           // Record duration histograms — legacy (ms) and stable GenAI (s).

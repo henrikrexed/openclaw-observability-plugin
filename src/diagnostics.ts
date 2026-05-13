@@ -23,6 +23,8 @@ import {
   OC_PROVIDER,
   TOKEN_TYPE_INPUT,
   TOKEN_TYPE_OUTPUT,
+  TOKEN_TYPE_CACHE_READ,
+  TOKEN_TYPE_CACHE_CREATION,
 } from "./semconv.js";
 
 // Import from OpenClaw plugin SDK (loaded lazily)
@@ -253,9 +255,17 @@ export async function registerDiagnosticsListener(
     }
     if (usage.cacheRead) {
       counters.tokensPrompt.add(usage.cacheRead, { ...metricAttrs, "token.type": "cache_read" });
+      histograms.genAiTokenUsage.record(usage.cacheRead, {
+        ...metricAttrs,
+        [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_READ,
+      });
     }
     if (usage.cacheWrite) {
       counters.tokensPrompt.add(usage.cacheWrite, { ...metricAttrs, "token.type": "cache_write" });
+      histograms.genAiTokenUsage.record(usage.cacheWrite, {
+        ...metricAttrs,
+        [GEN_AI_TOKEN_TYPE]: TOKEN_TYPE_CACHE_CREATION,
+      });
     }
     if (usage.total) {
       counters.tokensTotal.add(usage.total, metricAttrs);

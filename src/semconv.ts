@@ -154,3 +154,5 @@ export const OPENCLAW_SCHEMA_VERSION = "1.3.0";
 // ── Token type values ───────────────────────────────────────────────
 export const TOKEN_TYPE_INPUT = "input";
 export const TOKEN_TYPE_OUTPUT = "output";
+export const TOKEN_TYPE_CACHE_READ = "cache_read";
+export const TOKEN_TYPE_CACHE_CREATION = "cache_creation";
