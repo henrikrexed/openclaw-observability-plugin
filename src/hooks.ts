@@ -116,7 +116,13 @@ function codeAttrs(funcName: string, filePath: string = CODE_FILE): Record<strin
   };
 }
 
-const store = new TraceContextStore();
+// Use a global singleton so trace contexts survive plugin reloads.
+// The gateway may reload the plugin when config changes, but active
+// sessions should keep their trace hierarchy.
+const GLOBAL_STORE_KEY = "__openclaw_otel_trace_context_store__";
+const store: TraceContextStore =
+  (globalThis as any)[GLOBAL_STORE_KEY] || new TraceContextStore();
+(globalThis as any)[GLOBAL_STORE_KEY] = store;
 
 /**
  * Register all plugin hooks on the OpenClaw plugin API.
@@ -245,6 +251,7 @@ export function registerHooks(
     "message_received",
     async (event: any, ctx: any) => {
       try {
+        logger.info(`[otel] message_received fired: sessionKey=${event?.sessionKey || ctx?.sessionKey}, channel=${event?.channel}`);
         const tel = getTelemetry();
         if (!tel) return;
         const { tracer, counters } = tel;
@@ -488,8 +495,30 @@ export function registerHooks(
         const sessionKey = ctx?.sessionKey || "unknown";
         const agentId = ctx?.agentId || "unknown";
 
-        const sessionCtx = store.getActiveContext(sessionKey);
+        let sessionCtx = store.getActiveContext(sessionKey);
         logger.info(`[otel] before_model_resolve: sessionKey=${sessionKey}, hasSessionCtx=${!!sessionCtx}`);
+        
+        // For heartbeats/cron that don't fire message_received, create a
+        // synthetic root span so the trace still has a proper hierarchy.
+        if (!sessionCtx) {
+          const rootSpan = tracer.startSpan("openclaw.request", {
+            kind: SpanKind.SERVER,
+            attributes: {
+              [GEN_AI_CONVERSATION_ID]: sessionKey,
+              "openclaw.session.key": sessionKey,
+              "openclaw.trigger": ctx?.trigger || "unknown",
+              "openclaw.agent.id": agentId,
+            },
+          });
+          const rootContext = trace.setSpan(context.active(), rootSpan);
+          store.setActiveContext(sessionKey, {
+            rootSpan,
+            rootContext,
+            startTime: Date.now(),
+          });
+          sessionCtx = store.getActiveContext(sessionKey);
+          logger.info(`[otel] Created synthetic root span for heartbeat/cron: spanId=${rootSpan.spanContext().spanId}`);
+        }
         
         const parentContext = sessionCtx?.rootContext || context.active();
 
