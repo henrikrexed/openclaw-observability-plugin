@@ -45,6 +45,12 @@ receivers:
     include_file_path: true
     operators:
       # Parse OpenClaw JSON logs
+      # Note: OpenClaw uses ISO 8601 with colon in timezone (+00:00)
+      # We first replace +00:00 with +0000, then parse
+      - type: regex_replace
+        field: body
+        regex: '([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3})(\+[0-9]{2}):([0-9]{2})'
+        replacement: '$1$2$3'
       - type: json_parser
         parse_from: body
         timestamp:

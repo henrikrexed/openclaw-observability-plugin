@@ -134,6 +134,58 @@ export async function registerDiagnosticsListener(
       return;
     }
 
+    // ISI-1016: Gateway health metrics from diagnostic events
+    if (evt.type === "diagnostic.liveness.warning") {
+      const {
+        eventLoopDelayP99Ms,
+        eventLoopDelayMaxMs,
+        eventLoopUtilization,
+        cpuCoreRatio,
+        active,
+        waiting,
+        queued,
+      } = evt;
+
+      counters.livenessWarnings.add(1, {
+        "openclaw.diagnostic.phase": evt.phase || "unknown",
+      });
+
+      if (typeof eventLoopDelayP99Ms === "number") {
+        histograms.gatewayEventLoopDelayP99.record(eventLoopDelayP99Ms);
+      }
+      if (typeof eventLoopDelayMaxMs === "number") {
+        histograms.gatewayEventLoopDelayMax.record(eventLoopDelayMaxMs);
+      }
+      if (typeof eventLoopUtilization === "number") {
+        histograms.gatewayEventLoopUtilization.record(eventLoopUtilization);
+      }
+      if (typeof cpuCoreRatio === "number") {
+        histograms.gatewayCpuCoreRatio.record(cpuCoreRatio);
+      }
+      if (typeof queued === "number") {
+        histograms.gatewayWorkQueued.record(queued);
+      }
+
+      logger.debug?.(
+        `[otel] diagnostic.liveness.warning: eventLoopDelayP99Ms=${eventLoopDelayP99Ms}, cpuCoreRatio=${cpuCoreRatio}, queued=${queued}`
+      );
+      return;
+    }
+
+    if (evt.type === "diagnostic.heartbeat") {
+      counters.diagnosticHeartbeats.add(1, {
+        "openclaw.diagnostic.phase": evt.phase || "unknown",
+      });
+
+      // Record queue depth if available
+      if (typeof evt.queued === "number") {
+        histograms.gatewayWorkQueued.record(evt.queued);
+      }
+
+      logger.debug?.(`[otel] diagnostic.heartbeat: webhooks=${evt.webhooks?.received}/${evt.webhooks?.processed}/${evt.webhooks?.errors}`);
+      return;
+    }
+
     if (evt.type !== "model.usage") return;
 
     const sessionKey = evt.sessionKey || "unknown";

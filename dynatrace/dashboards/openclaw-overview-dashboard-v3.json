@@ -1,0 +1,301 @@
+{
+  "name": "OpenClaw AI Agent Observability - V3",
+  "type": "dashboard",
+  "content": {
+    "version": 21,
+    "variables": [
+      {
+        "version": 2,
+        "key": "Service",
+        "type": "query",
+        "visible": true,
+        "editable": true,
+        "input": "fetch dt.entity.service | fields name",
+        "multiple": false
+      }
+    ],
+    "tiles": {
+      "0": {
+        "type": "markdown",
+        "title": "",
+        "content": "# 🎩 OpenClaw AI Agent Observability V3\n\nReal-time monitoring of AI agent operations, GenAI metrics, traces, and logs."
+      },
+      "1": {
+        "type": "data",
+        "title": "Active Sessions",
+        "query": "fetch spans\n| filter service.name == \"openclaw-gateway\" and span.name == \"openclaw.request\"\n| summarize sessions = countDistinct(openclaw.session.key), by:{gen_ai.agent.name}\n| sort sessions desc",
+        "visualization": "singleValue",
+        "visualizationSettings": {
+          "singleValue": {
+            "showLabel": true,
+            "label": "Active Sessions",
+            "prefixIcon": "UserGroupIcon"
+          }
+        }
+      },
+      "2": {
+        "type": "data",
+        "title": "Total Token Usage (24h)",
+        "query": "timeseries token_usage = sum(gen_ai.client.token.usage)\n| summarize total_tokens = sum(token_usage)\n| fieldsAdd total_tokens = round(total_tokens, decimals: 0)",
+        "visualization": "singleValue",
+        "visualizationSettings": {
+          "singleValue": {
+            "showLabel": true,
+            "label": "Tokens",
+            "prefixIcon": "DataIngestIcon"
+          }
+        }
+      },
+      "3": {
+        "type": "data",
+        "title": "Avg Agent Turn Duration",
+        "query": "fetch spans\n| filter service.name == \"openclaw-gateway\" and span.name == \"openclaw.agent.turn\"\n| fieldsAdd duration_ms = toDouble(duration) / 1000000\n| summarize avg_ms = avg(duration_ms), p95_ms = percentile(duration_ms, 95)",
+        "visualization": "singleValue",
+        "visualizationSettings": {
+          "singleValue": {
+            "showLabel": true,
+            "label": "Avg Duration (ms)",
+            "prefixIcon": "ClockIcon"
+          }
+        }
+      },
+      "4": {
+        "type": "data",
+        "title": "Error Rate",
+        "query": "fetch spans\n| filter service.name == \"openclaw-gateway\"\n| fieldsAdd is_error = if(status.code == \"Error\", 1, 0)\n| summarize error_rate = 100 * sum(is_error) / count()\n| fieldsAdd error_rate = round(error_rate, decimals: 2)",
+        "visualization": "singleValue",
+        "visualizationSettings": {
+          "thresholds": [
+            {
+              "field": "error_rate",
+              "isEnabled": true,
+              "rules": [
+                {"color": {"Default": "#7dc540"}, "comparator": "≤", "value": 1},
+                {"color": {"Default": "#f5d30f"}, "comparator": "≤", "value": 5},
+                {"color": {"Default": "#dc172a"}, "comparator": ">", "value": 5}
+              ]
+            }
+          ],
+          "singleValue": {
+            "showLabel": true,
+            "label": "Error Rate %",
+            "prefixIcon": "AlertIcon"
+          }
+        }
+      },
+      "5": {
+        "type": "markdown",
+        "title": "",
+        "content": "## 📊 GenAI Token Usage & Costs"
+      },
+      "6": {
+        "type": "data",
+        "title": "Token Usage by Model & Type",
+        "query": "timeseries token_usage = sum(gen_ai.client.token.usage), by:{gen_ai.token.type, gen_ai.request.model}, interval:10m",
+        "visualization": "areaChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "gapPolicy": "connect",
+            "legend": {"position": "bottom"}
+          }
+        }
+      },
+      "7": {
+        "type": "data",
+        "title": "Token Usage Breakdown (Input vs Output vs Cache)",
+        "query": "timeseries {\n  input = sum(gen_ai.client.token.usage, {gen_ai.token.type=\"input\"}),\n  output = sum(gen_ai.client.token.usage, {gen_ai.token.type=\"output\"}),\n  cache_read = sum(gen_ai.client.token.usage, {gen_ai.token.type=\"cache_read\"}),\n  cache_creation = sum(gen_ai.client.token.usage, {gen_ai.token.type=\"cache_creation\"})\n}, interval:10m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"},
+            "leftYAxisSettings": {"label": "Tokens"}
+          }
+        }
+      },
+      "8": {
+        "type": "data",
+        "title": "Cache Efficiency",
+        "query": "timeseries {\n  cache_read = sum(gen_ai.client.token.usage, {gen_ai.token.type=\"cache_read\"}),\n  input = sum(gen_ai.client.token.usage, {gen_ai.token.type=\"input\"})\n}\n| fieldsAdd cache_rate = if(input > 0, 100 * cache_read / input, 0)",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "leftYAxisSettings": {"label": "Cache Hit %"}
+          }
+        }
+      },
+      "9": {
+        "type": "markdown",
+        "title": "",
+        "content": "## ⚡ Agent Performance & Traces"
+      },
+      "10": {
+        "type": "data",
+        "title": "Agent Turn Duration by Agent",
+        "query": "fetch spans\n| filter service.name == \"openclaw-gateway\" and span.name == \"openclaw.agent.turn\"\n| fieldsAdd duration_ms = toDouble(duration) / 1000000\n| makeTimeseries avg_ms = avg(duration_ms), p95_ms = percentile(duration_ms, 95), by:{gen_ai.agent.name}, interval:5m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"},
+            "leftYAxisSettings": {"label": "Duration (ms)"}
+          }
+        }
+      },
+      "11": {
+        "type": "data",
+        "title": "Model Call Duration by Provider",
+        "query": "fetch spans\n| filter service.name == \"openclaw-gateway\" and startsWith(span.name, \"chat \")\n| fieldsAdd duration_ms = toDouble(duration) / 1000000\n| makeTimeseries avg_ms = avg(duration_ms), p95_ms = percentile(duration_ms, 95), by:{gen_ai.provider.name}, interval:5m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"},
+            "leftYAxisSettings": {"label": "Duration (ms)"}
+          }
+        }
+      },
+      "12": {
+        "type": "data",
+        "title": "Tool Call Performance (Top 15)",
+        "query": "fetch spans\n| filter service.name == \"openclaw-gateway\" and startsWith(span.name, \"execute_tool \")\n| fieldsAdd duration_ms = toDouble(duration) / 1000000\n| summarize avg_ms = avg(duration_ms), p95_ms = percentile(duration_ms, 95), count = count(), by:{span.name}\n| sort count desc\n| limit 15",
+        "visualization": "table",
+        "visualizationSettings": {
+          "table": {
+            "rowDensity": "comfortable"
+          }
+        }
+      },
+      "13": {
+        "type": "data",
+        "title": "Tool Call Volume Over Time",
+        "query": "fetch spans\n| filter service.name == \"openclaw-gateway\" and startsWith(span.name, \"execute_tool \")\n| makeTimeseries calls = count(), by:{span.name}, interval:5m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "gapPolicy": "connect",
+            "legend": {"position": "bottom"}
+          }
+        }
+      },
+      "14": {
+        "type": "markdown",
+        "title": "",
+        "content": "## 🔍 Trace Waterfall & Session Flow"
+      },
+      "15": {
+        "type": "data",
+        "title": "Recent Sessions (Trace Overview)",
+        "query": "fetch spans\n| filter service.name == \"openclaw-gateway\" and span.name == \"openclaw.request\"\n| fields timestamp, trace_id, openclaw.session.key, gen_ai.agent.name, duration\n| fieldsAdd duration_ms = toDouble(duration) / 1000000\n| sort timestamp desc\n| limit 20",
+        "visualization": "table",
+        "visualizationSettings": {
+          "table": {
+            "rowDensity": "comfortable"
+          }
+        }
+      },
+      "16": {
+        "type": "data",
+        "title": "Span Distribution by Type",
+        "query": "fetch spans\n| filter service.name == \"openclaw-gateway\"\n| summarize count = count(), by:{span.name}\n| sort count desc\n| limit 20",
+        "visualization": "pieChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "right"}
+          }
+        }
+      },
+      "17": {
+        "type": "markdown",
+        "title": "",
+        "content": "## 📋 Sub-agent & Cron Activity"
+      },
+      "18": {
+        "type": "data",
+        "title": "Sub-agent Spawn Rate",
+        "query": "fetch spans\n| filter service.name == \"openclaw-gateway\" and span.name == \"openclaw.subagent.spawn\"\n| makeTimeseries spawns = count(), by:{openclaw.subagent.child_agent_name}, interval:5m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"}
+          }
+        }
+      },
+      "19": {
+        "type": "data",
+        "title": "Cron Job Execution Status",
+        "query": "fetch spans\n| filter service.name == \"openclaw-gateway\" and startsWith(span.name, \"openclaw.cron.\")\n| summarize count = count(), by:{span.name, status.code}\n| sort count desc",
+        "visualization": "table",
+        "visualizationSettings": {
+          "table": {
+            "rowDensity": "comfortable"
+          }
+        }
+      },
+      "20": {
+        "type": "markdown",
+        "title": "",
+        "content": "## 📝 Logs & Errors"
+      },
+      "21": {
+        "type": "data",
+        "title": "Error Logs by Component",
+        "query": "fetch logs\n| filter service.name == \"openclaw-gateway\" and status == \"error\"\n| summarize count = count(), by:{source}\n| sort count desc\n| limit 15",
+        "visualization": "barChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "categoricalBarChartSettings": {
+              "categoryAxis": "source",
+              "valueAxis": "count"
+            }
+          }
+        }
+      },
+      "22": {
+        "type": "data",
+        "title": "Recent Error Logs",
+        "query": "fetch logs\n| filter service.name == \"openclaw-gateway\" and status == \"error\"\n| fields timestamp, content, source, openclaw.session.key\n| sort timestamp desc\n| limit 20",
+        "visualization": "table",
+        "visualizationSettings": {
+          "table": {
+            "rowDensity": "comfortable"
+          }
+        }
+      },
+      "23": {
+        "type": "data",
+        "title": "Log Volume Over Time",
+        "query": "fetch logs\n| filter service.name == \"openclaw-gateway\"\n| makeTimeseries volume = count(), by:{status}, interval:5m",
+        "visualization": "areaChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"}
+          }
+        }
+      }
+    },
+    "layouts": {
+      "0": {"x": 0, "y": 0, "w": 24, "h": 2},
+      "1": {"x": 0, "y": 2, "w": 6, "h": 4},
+      "2": {"x": 6, "y": 2, "w": 6, "h": 4},
+      "3": {"x": 12, "y": 2, "w": 6, "h": 4},
+      "4": {"x": 18, "y": 2, "w": 6, "h": 4},
+      "5": {"x": 0, "y": 6, "w": 24, "h": 1},
+      "6": {"x": 0, "y": 7, "w": 12, "h": 6},
+      "7": {"x": 12, "y": 7, "w": 12, "h": 6},
+      "8": {"x": 0, "y": 13, "w": 24, "h": 5},
+      "9": {"x": 0, "y": 18, "w": 24, "h": 1},
+      "10": {"x": 0, "y": 19, "w": 12, "h": 6},
+      "11": {"x": 12, "y": 19, "w": 12, "h": 6},
+      "12": {"x": 0, "y": 25, "w": 12, "h": 6},
+      "13": {"x": 12, "y": 25, "w": 12, "h": 6},
+      "14": {"x": 0, "y": 31, "w": 24, "h": 1},
+      "15": {"x": 0, "y": 32, "w": 16, "h": 6},
+      "16": {"x": 16, "y": 32, "w": 8, "h": 6},
+      "17": {"x": 0, "y": 38, "w": 24, "h": 1},
+      "18": {"x": 0, "y": 39, "w": 12, "h": 6},
+      "19": {"x": 12, "y": 39, "w": 12, "h": 6},
+      "20": {"x": 0, "y": 45, "w": 24, "h": 1},
+      "21": {"x": 0, "y": 46, "w": 12, "h": 6},
+      "22": {"x": 12, "y": 46, "w": 12, "h": 6},
+      "23": {"x": 0, "y": 52, "w": 24, "h": 5}
+    }
+  }
+}
