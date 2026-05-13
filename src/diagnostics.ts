@@ -42,11 +42,13 @@ async function loadSdk(): Promise<void> {
   }
 }
 
-// Direct access to internal diagnostic events (fallback)
+// Direct access to internal diagnostic events (preferred - bypasses SDK wrapper)
 let onInternalDiagnosticEvent: ((listener: (evt: any) => void) => () => void) | null = null;
+let internalLoadAttempted = false;
 
 async function loadInternalDiagnostics(): Promise<void> {
-  if (onInternalDiagnosticEvent) return;
+  if (internalLoadAttempted) return;
+  internalLoadAttempted = true;
   try {
     // Try to load from the internal module directly
     // @ts-ignore
@@ -103,6 +105,11 @@ export async function registerDiagnosticsListener(
   }
   
   logger.info(`[otel] Using diagnostic event source: ${onInternalDiagnosticEvent ? 'internal' : 'sdk'}`);
+  
+  // Test: emit a test event to verify the listener is working
+  setTimeout(() => {
+    logger.info(`[otel] Test: Checking if diagnostic events are being received...`);
+  }, 5000);
 
   const { counters, histograms } = telemetry;
 
