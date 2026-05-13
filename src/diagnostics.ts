@@ -86,6 +86,8 @@ export async function registerDiagnosticsListener(
   const { counters, histograms } = telemetry;
 
   const unsubscribe = onDiagnosticEvent((evt: any) => {
+    logger.info(`[otel] diagnostic event received: type=${evt?.type}`);
+    
     // ISI-1017: Queue events
     if (evt.type === "queue.lane.enqueue") {
       const { lane, depth, waitMs } = evt;
