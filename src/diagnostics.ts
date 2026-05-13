@@ -166,7 +166,7 @@ export async function registerDiagnosticsListener(
         histograms.gatewayWorkQueued.record(queued);
       }
 
-      logger.debug?.(
+      logger.info(
         `[otel] diagnostic.liveness.warning: eventLoopDelayP99Ms=${eventLoopDelayP99Ms}, cpuCoreRatio=${cpuCoreRatio}, queued=${queued}`
       );
       return;
