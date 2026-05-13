@@ -81,7 +81,7 @@
       "6": {
         "type": "data",
         "title": "Token Usage by Type",
-        "query": "timeseries {\n  input = sum(gen_ai.client.token.usage, filter:{gen_ai.token.type==\"input\"}),\n  output = sum(gen_ai.client.token.usage, filter:{gen_ai.token.type==\"output\"}),\n  cache_read = sum(gen_ai.client.token.usage, filter:{gen_ai.token.type==\"cache_read\"}),\n  cache_creation = sum(gen_ai.client.token.usage, filter:{gen_ai.token.type==\"cache_creation\"})\n}, interval:10m",
+        "query": "timeseries {\n  input = sum(gen_ai.client.token.usage, filter:{gen_ai.token.type==\"input\"}),\n  output = sum(gen_ai.client.token.usage, filter:{gen_ai.token.type==\"output\"}),\n  cache_read = sum(gen_ai.client.token.usage, filter:{gen_ai.token.type==\"cache_read\"}, default:0),\n  cache_creation = sum(gen_ai.client.token.usage, filter:{gen_ai.token.type==\"cache_creation\"}, default:0)\n}, interval:10m",
         "visualization": "areaChart",
         "visualizationSettings": {
           "chartSettings": {
