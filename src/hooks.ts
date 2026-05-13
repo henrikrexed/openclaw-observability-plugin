@@ -259,7 +259,6 @@ export function registerHooks(
         const securityCounters = buildSecurityCounters(tel);
 
         const channel = event?.channel || "unknown";
-        const sessionKey = event?.sessionKey || ctx?.sessionKey || "unknown";
         const from = event?.from || event?.senderId || "unknown";
         const messageText = event?.text || event?.message || "";
 
