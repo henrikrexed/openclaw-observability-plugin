@@ -1,0 +1,461 @@
+{
+  "name": "OpenClaw AI Agent Observability - Plugin Data Only",
+  "type": "dashboard",
+  "content": {
+    "version": 21,
+    "variables": [],
+    "tiles": {
+      "0": {
+        "type": "markdown",
+        "title": "",
+        "content": "# 🎩 OpenClaw AI Agent Observability\n\nReal-time monitoring using ONLY data collected by the OpenClaw OTel plugin."
+      },
+      "1": {
+        "type": "data",
+        "title": "Messages Received",
+        "query": "timeseries msgs = sum(openclaw.messages.received)\n| summarize total = sum(msgs)",
+        "visualization": "singleValue",
+        "visualizationSettings": {
+          "singleValue": {
+            "showLabel": true,
+            "label": "Messages",
+            "prefixIcon": "MessageIcon"
+          }
+        }
+      },
+      "2": {
+        "type": "data",
+        "title": "Total Token Usage",
+        "query": "timeseries tokens = sum(openclaw.llm.tokens.total)\n| summarize total = sum(tokens)",
+        "visualization": "singleValue",
+        "visualizationSettings": {
+          "singleValue": {
+            "showLabel": true,
+            "label": "Tokens",
+            "prefixIcon": "DataIngestIcon"
+          }
+        }
+      },
+      "3": {
+        "type": "data",
+        "title": "Tool Calls",
+        "query": "timeseries calls = sum(openclaw.tool.calls)\n| summarize total = sum(calls)",
+        "visualization": "singleValue",
+        "visualizationSettings": {
+          "singleValue": {
+            "showLabel": true,
+            "label": "Calls",
+            "prefixIcon": "ToolIcon"
+          }
+        }
+      },
+      "4": {
+        "type": "data",
+        "title": "Error Rate",
+        "query": "timeseries {
+  errors = sum(openclaw.llm.errors) + sum(openclaw.tool.errors) + sum(openclaw.cron.errors),
+  total = sum(openclaw.llm.requests) + sum(openclaw.tool.calls) + sum(openclaw.cron.executions)
+}\n| fieldsAdd error_rate = if(total > 0, 100 * errors / total, 0)\n| summarize avg_error_rate = avg(error_rate)",
+        "visualization": "singleValue",
+        "visualizationSettings": {
+          "thresholds": [
+            {
+              "field": "avg_error_rate",
+              "isEnabled": true,
+              "rules": [
+                {"color": {"Default": "#7dc540"}, "comparator": "≤", "value": 1},
+                {"color": {"Default": "#f5d30f"}, "comparator": "≤", "value": 5},
+                {"color": {"Default": "#dc172a"}, "comparator": ">", "value": 5}
+              ]
+            }
+          ],
+          "singleValue": {
+            "showLabel": true,
+            "label": "Error Rate %",
+            "prefixIcon": "AlertIcon"
+          }
+        }
+      },
+      "5": {
+        "type": "markdown",
+        "title": "",
+        "content": "## 📊 Token Usage Breakdown"
+      },
+      "6": {
+        "type": "data",
+        "title": "Token Usage by Type",
+        "query": "timeseries {
+  prompt = sum(openclaw.llm.tokens.prompt),
+  completion = sum(openclaw.llm.tokens.completion),
+  system = sum(openclaw.llm.tokens.system),
+  user = sum(openclaw.llm.tokens.user),
+  tool_result = sum(openclaw.llm.tokens.tool_result),
+  skill = sum(openclaw.llm.tokens.skill)
+}, interval:10m",
+        "visualization": "areaChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "gapPolicy": "connect",
+            "legend": {"position": "bottom"}
+          }
+        }
+      },
+      "7": {
+        "type": "data",
+        "title": "Token Usage by Model",
+        "query": "timeseries tokens = sum(openclaw.llm.tokens.total), by:{gen_ai.response.model}, interval:10m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"},
+            "leftYAxisSettings": {"label": "Tokens"}
+          }
+        }
+      },
+      "8": {
+        "type": "markdown",
+        "title": "",
+        "content": "## ⚡ Performance Metrics"
+      },
+      "9": {
+        "type": "data",
+        "title": "Agent Turn Duration",
+        "query": "timeseries avg_ms = avg(openclaw.agent.turn_duration), p95_ms = percentile(openclaw.agent.turn_duration, 95), interval:5m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"},
+            "leftYAxisSettings": {"label": "Duration (ms)"}
+          }
+        }
+      },
+      "10": {
+        "type": "data",
+        "title": "LLM Request Duration",
+        "query": "timeseries avg_ms = avg(openclaw.llm.duration), p95_ms = percentile(openclaw.llm.duration, 95), interval:5m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"},
+            "leftYAxisSettings": {"label": "Duration (ms)"}
+          }
+        }
+      },
+      "11": {
+        "type": "data",
+        "title": "Tool Call Duration",
+        "query": "timeseries avg_ms = avg(openclaw.tool.duration), p95_ms = percentile(openclaw.tool.duration, 95), interval:5m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"},
+            "leftYAxisSettings": {"label": "Duration (ms)"}
+          }
+        }
+      },
+      "12": {
+        "type": "markdown",
+        "title": "",
+        "content": "## 🔧 Tool & Agent Activity"
+      },
+      "13": {
+        "type": "data",
+        "title": "Tool Calls by Tool Name",
+        "query": "fetch spans\n| filter service.name == \"openclaw-gateway\" and startsWith(span.name, \"execute_tool \")\n| summarize count = count(), avg_duration = avg(duration), by:{span.name}\n| sort count desc\n| limit 15",
+        "visualization": "table",
+        "visualizationSettings": {
+          "table": {
+            "rowDensity": "comfortable"
+          }
+        }
+      },
+      "14": {
+        "type": "data",
+        "title": "Tool Call Volume",
+        "query": "timeseries calls = sum(openclaw.tool.calls), by:{openclaw.tool.name}, interval:5m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"}
+          }
+        }
+      },
+      "15": {
+        "type": "data",
+        "title": "Tool Errors",
+        "query": "timeseries errors = sum(openclaw.tool.errors), by:{openclaw.tool.name}, interval:5m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"}
+          }
+        }
+      },
+      "16": {
+        "type": "markdown",
+        "title": "",
+        "content": "## 🔄 Cron & Sub-agent Activity"
+      },
+      "17": {
+        "type": "data",
+        "title": "Cron Executions",
+        "query": "timeseries {
+  executions = sum(openclaw.cron.executions),
+  errors = sum(openclaw.cron.errors)
+}, interval:5m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"}
+          }
+        }
+      },
+      "18": {
+        "type": "data",
+        "title": "Cron Duration",
+        "query": "timeseries avg_ms = avg(openclaw.cron.duration), p95_ms = percentile(openclaw.cron.duration, 95), interval:5m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"},
+            "leftYAxisSettings": {"label": "Duration (ms)"}
+          }
+        }
+      },
+      "19": {
+        "type": "data",
+        "title": "Sub-agent Spawns",
+        "query": "timeseries spawns = sum(openclaw.subagent.spawns), ended = sum(openclaw.subagent.ended), interval:5m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"}
+          }
+        }
+      },
+      "20": {
+        "type": "markdown",
+        "title": "",
+        "content": "## 🏥 Gateway Health"
+      },
+      "21": {
+        "type": "data",
+        "title": "Event Loop Delay (P99)",
+        "query": "timeseries p99_ms = avg(openclaw.gateway.event_loop_delay_p99), max_ms = avg(openclaw.gateway.event_loop_delay_max), interval:1m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"},
+            "leftYAxisSettings": {"label": "Delay (ms)"}
+          }
+        }
+      },
+      "22": {
+        "type": "data",
+        "title": "Event Loop Utilization",
+        "query": "timeseries utilization = avg(openclaw.gateway.event_loop_utilization), interval:1m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"},
+            "leftYAxisSettings": {"label": "Utilization", "min": 0, "max": 1}
+          }
+        }
+      },
+      "23": {
+        "type": "data",
+        "title": "CPU Core Ratio",
+        "query": "timeseries cpu_ratio = avg(openclaw.gateway.cpu_core_ratio), interval:1m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"},
+            "leftYAxisSettings": {"label": "Ratio"}
+          }
+        }
+      },
+      "24": {
+        "type": "data",
+        "title": "Work Queued",
+        "query": "timeseries queued = avg(openclaw.gateway.work_queued), interval:1m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"},
+            "leftYAxisSettings": {"label": "Items"}
+          }
+        }
+      },
+      "25": {
+        "type": "data",
+        "title": "Liveness Warnings",
+        "query": "timeseries warnings = sum(openclaw.liveness.warnings), heartbeats = sum(openclaw.diagnostic.heartbeats), interval:1m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"}
+          }
+        }
+      },
+      "26": {
+        "type": "markdown",
+        "title": "",
+        "content": "## 🛡️ Security Events"
+      },
+      "27": {
+        "type": "data",
+        "title": "Security Events",
+        "query": "timeseries {
+  total = sum(openclaw.security.events),
+  sensitive_files = sum(openclaw.security.sensitive_file_access),
+  prompt_injection = sum(openclaw.security.prompt_injection),
+  dangerous_cmd = sum(openclaw.security.dangerous_command)
+}, interval:5m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"}
+          }
+        }
+      },
+      "28": {
+        "type": "markdown",
+        "title": "",
+        "content": "## 📋 Queue & Session Health"
+      },
+      "29": {
+        "type": "data",
+        "title": "Queue Depth",
+        "query": "timeseries depth = avg(openclaw.queue.depth), interval:1m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"}
+          }
+        }
+      },
+      "30": {
+        "type": "data",
+        "title": "Queue Wait Time",
+        "query": "timeseries wait_ms = avg(openclaw.queue.wait_ms), interval:1m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"},
+            "leftYAxisSettings": {"label": "Wait (ms)"}
+          }
+        }
+      },
+      "31": {
+        "type": "data",
+        "title": "Session Issues",
+        "query": "timeseries {
+  stuck = sum(openclaw.session.stuck),
+  long_running = sum(openclaw.session.long_running),
+  stalled = sum(openclaw.session.stalled),
+  resets = sum(openclaw.session.resets)
+}, interval:5m",
+        "visualization": "lineChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"}
+          }
+        }
+      },
+      "32": {
+        "type": "markdown",
+        "title": "",
+        "content": "## 🔍 Traces"
+      },
+      "33": {
+        "type": "data",
+        "title": "Recent Sessions",
+        "query": "fetch spans\n| filter service.name == \"openclaw-gateway\" and span.name == \"openclaw.request\"\n| fields timestamp, trace_id, openclaw.session.key, openclaw.agent.id, duration\n| fieldsAdd duration_ms = toDouble(duration) / 1000000\n| sort timestamp desc\n| limit 20",
+        "visualization": "table",
+        "visualizationSettings": {
+          "table": {
+            "rowDensity": "comfortable"
+          }
+        }
+      },
+      "34": {
+        "type": "data",
+        "title": "Span Distribution",
+        "query": "fetch spans\n| filter service.name == \"openclaw-gateway\"\n| summarize count = count(), by:{span.name}\n| sort count desc\n| limit 20",
+        "visualization": "pieChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "right"}
+          }
+        }
+      },
+      "35": {
+        "type": "markdown",
+        "title": "",
+        "content": "## 📝 Logs"
+      },
+      "36": {
+        "type": "data",
+        "title": "Log Volume",
+        "query": "fetch logs\n| filter service.name == \"openclaw-gateway\"\n| makeTimeseries volume = count(), by:{status}, interval:5m",
+        "visualization": "areaChart",
+        "visualizationSettings": {
+          "chartSettings": {
+            "legend": {"position": "bottom"}
+          }
+        }
+      },
+      "37": {
+        "type": "data",
+        "title": "Recent Errors",
+        "query": "fetch logs\n| filter service.name == \"openclaw-gateway\" and status == \"error\"\n| fields timestamp, content, source, openclaw.session.key\n| sort timestamp desc\n| limit 20",
+        "visualization": "table",
+        "visualizationSettings": {
+          "table": {
+            "rowDensity": "comfortable"
+          }
+        }
+      }
+    },
+    "layouts": {
+      "0": {"x": 0, "y": 0, "w": 24, "h": 2},
+      "1": {"x": 0, "y": 2, "w": 6, "h": 4},
+      "2": {"x": 6, "y": 2, "w": 6, "h": 4},
+      "3": {"x": 12, "y": 2, "w": 6, "h": 4},
+      "4": {"x": 18, "y": 2, "w": 6, "h": 4},
+      "5": {"x": 0, "y": 6, "w": 24, "h": 1},
+      "6": {"x": 0, "y": 7, "w": 12, "h": 6},
+      "7": {"x": 12, "y": 7, "w": 12, "h": 6},
+      "8": {"x": 0, "y": 13, "w": 24, "h": 1},
+      "9": {"x": 0, "y": 14, "w": 8, "h": 6},
+      "10": {"x": 8, "y": 14, "w": 8, "h": 6},
+      "11": {"x": 16, "y": 14, "w": 8, "h": 6},
+      "12": {"x": 0, "y": 20, "w": 24, "h": 1},
+      "13": {"x": 0, "y": 21, "w": 12, "h": 6},
+      "14": {"x": 12, "y": 21, "w": 6, "h": 6},
+      "15": {"x": 18, "y": 21, "w": 6, "h": 6},
+      "16": {"x": 0, "y": 27, "w": 24, "h": 1},
+      "17": {"x": 0, "y": 28, "w": 8, "h": 6},
+      "18": {"x": 8, "y": 28, "w": 8, "h": 6},
+      "19": {"x": 16, "y": 28, "w": 8, "h": 6},
+      "20": {"x": 0, "y": 34, "w": 24, "h": 1},
+      "21": {"x": 0, "y": 35, "w": 8, "h": 6},
+      "22": {"x": 8, "y": 35, "w": 8, "h": 6},
+      "23": {"x": 16, "y": 35, "w": 8, "h": 6},
+      "24": {"x": 0, "y": 41, "w": 8, "h": 6},
+      "25": {"x": 8, "y": 41, "w": 16, "h": 6},
+      "26": {"x": 0, "y": 47, "w": 24, "h": 1},
+      "27": {"x": 0, "y": 48, "w": 24, "h": 6},
+      "28": {"x": 0, "y": 54, "w": 24, "h": 1},
+      "29": {"x": 0, "y": 55, "w": 8, "h": 6},
+      "30": {"x": 8, "y": 55, "w": 8, "h": 6},
+      "31": {"x": 16, "y": 55, "w": 8, "h": 6},
+      "32": {"x": 0, "y": 61, "w": 24, "h": 1},
+      "33": {"x": 0, "y": 62, "w": 16, "h": 6},
+      "34": {"x": 16, "y": 62, "w": 8, "h": 6},
+      "35": {"x": 0, "y": 68, "w": 24, "h": 1},
+      "36": {"x": 0, "y": 69, "w": 12, "h": 6},
+      "37": {"x": 12, "y": 69, "w": 12, "h": 6}
+    }
+  }
+}
