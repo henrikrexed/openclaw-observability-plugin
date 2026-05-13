@@ -338,8 +338,8 @@ export function registerHooks(
         });
 
         logger.debug?.(`[otel] Root span started for session=${sessionKey}`);
-      } catch {
-        // Never let telemetry errors break the main flow
+      } catch (err) {
+        logger.error?.(`[otel] message_received error: ${err instanceof Error ? err.message : String(err)}`);
       }
     },
     { priority: 100 } // High priority — run first to establish context
