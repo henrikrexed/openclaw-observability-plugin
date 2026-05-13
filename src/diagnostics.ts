@@ -33,22 +33,12 @@ async function loadSdk(): Promise<void> {
   if (sdkLoadAttempted) return;
   sdkLoadAttempted = true;
   try {
-    // Try multiple paths to find the diagnostic events module
+    // Dynamic import to avoid build issues if SDK not available
     // @ts-ignore - openclaw/plugin-sdk types not available at build time
     const sdk = await import("openclaw/plugin-sdk") as any;
     onDiagnosticEvent = sdk.onDiagnosticEvent;
-    logger?.info?.(`[otel] Loaded onDiagnosticEvent from openclaw/plugin-sdk`);
-  } catch (err1) {
-    try {
-      // Fallback: try to load from the internal module
-      // @ts-ignore
-      const diag = await import("openclaw/dist/diagnostic-events-CjwOn-Qj.js") as any;
-      onDiagnosticEvent = diag.onDiagnosticEvent || diag.o;
-      logger?.info?.(`[otel] Loaded onDiagnosticEvent from internal module`);
-    } catch (err2) {
-      // SDK not available — will use fallback token extraction
-      logger?.warn?.(`[otel] Failed to load onDiagnosticEvent: ${err1}, ${err2}`);
-    }
+  } catch {
+    // SDK not available — will use fallback token extraction
   }
 }
 
