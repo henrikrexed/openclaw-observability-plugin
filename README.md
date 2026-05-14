@@ -16,8 +16,26 @@ The plugin follows a two-track support model. Pick the plugin track that matches
 | `0.1.x`      | `< 2026.4.21`     | `release/0.1.x`  | Maintenance — security + critical regressions only        | Through **2026-10-21**                         |
 | `0.2.x`      | `>= 2026.4.21`    | `main`           | Superseded by 0.3.x                                      | Replaced by 0.3.x                             |
 | `0.3.x`      | `>= 2026.4.21`    | `main`           | Active — V3 features, log pipeline, bug fixes             | Default going forward                          |
+| `0.6.x`      | `>= 2026.5.13`    | `main`           | Active — Dashboard, diagnostics, token types, telemetry   | Latest release                                 |
 
 > OpenClaw `2026.4.21` introduced the `before_model_resolve` and `before_prompt_build` hooks and deprecated `before_agent_start`. The `0.2.x` line targets the new hooks; the `0.1.x` line remains on the legacy hook for existing deployments.
+
+## What's New in 0.6.0
+
+**Released:** 2026-05-13
+
+### Features
+- **Plugin-only dashboard** — Built-in dashboard using collected metrics, spans, and logs for quick observability without external tooling
+
+### Improvements
+- **Token types** — Added `cache_read` and `cache_creation` token types for `gen_ai.client.token.usage` histogram
+- **Diagnostics** — Improved diagnostic event handling with internal module fallback, debug logging, and health metrics wiring
+- **Telemetry** — Prevented double-registration breaking span parent chains
+- **Hooks** — Trace context store persistence across plugin reloads, error logging for `message_received`
+
+### Bug Fixes
+- Dashboard hostname filter corrections and CPU utilization metric fixes
+- Cache token type handling with proper defaults for missing data
 
 ## Two Approaches to Observability
 
@@ -289,6 +307,7 @@ In your backend, look for an `openclaw.request` span with at least one `openclaw
 | **Security detection** | No | Prompt injection, dangerous commands |
 | **Cron monitoring** | No | Cron change/execution/error spans |
 | **Sub-agent tracking** | No | Spawn/duration/ended spans |
+| **Dashboard** | No | Plugin-only dashboard with metrics/spans/logs |
 | Setup complexity | Config only | Plugin installation |
 
 ---
