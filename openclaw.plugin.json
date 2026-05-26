@@ -4,6 +4,9 @@
   "description": "Traces, metrics, and logs for OpenClaw using OpenLLMetry and OpenTelemetry",
   "version": "0.6.0",
   "minOpenClawVersion": "2026.4.21",
+  "contracts": {
+    "tools": ["otel_status"]
+  },
   "uiHints": {
     "endpoint": {
       "label": "OTLP Endpoint",
