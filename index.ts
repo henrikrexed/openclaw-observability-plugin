@@ -247,8 +247,6 @@ const otelObservabilityPlugin = {
           unsubscribeDiagnostics();
           unsubscribeDiagnostics = null;
         }
-        // Unbridge the logger BEFORE shutting the pipeline so no late log
-        // call attempts to push into a draining exporter.
         if (restoreLogger) {
           restoreLogger();
           restoreLogger = null;
@@ -257,10 +255,18 @@ const otelObservabilityPlugin = {
           await logPipeline.shutdown();
           logPipeline = null;
         }
+        // Flush pending data but do NOT destroy the providers. OC's config
+        // hot-reload calls stop() → register() in sequence; a destructive
+        // shutdown() here kills the TracerProvider's exporter, and the new
+        // register() cycle's hooks still hold closures over the old runtime
+        // whose tracer routes through the (now dead) global provider.
+        // Flush is non-destructive: pending spans/metrics drain to the
+        // collector, but the providers stay usable for the existing hooks.
+        // True shutdown happens on process exit via the OTel SDK's
+        // registered signal handlers.
         if (telemetry) {
-          await telemetry.shutdown();
-          telemetry = null;
-          logger.info("[otel] Telemetry shut down");
+          await telemetry.flush();
+          logger.info("[otel] Telemetry flushed (providers preserved for hot-reload)");
         }
       },
     });
