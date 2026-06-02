@@ -135,9 +135,11 @@ OpenClaw drives plugins through three phases. Mixing them up is the single most 
         │                     │                     │
         │                     │                     │
         ▼                     ▼                     ▼
-  - api.on(*)           - initTelemetry()    - stopHooks()
-  - api.registerHook()  - initOpenLLMetry()  - unsubscribe()
-  - api.registerGate…   - registerDiagnost… - telemetry.shutdown()
+  - initTelemetry()     - initOpenLLMetry()  - stopHooks()
+  - api.on(*)           - env bridge         - unsubscribe()
+  - api.registerHook()                       - telemetry.flush()
+  - api.registerGate…
+  - api.on("gateway_stop")
   - api.registerCli()
   - api.registerService()
   - api.registerTool()
@@ -148,32 +150,41 @@ OpenClaw drives plugins through three phases. Mixing them up is the single most 
 
 | Phase | Runs | Responsibility |
 |---|---|---|
-| `register()` | Synchronous, before the gateway accepts traffic | Wire every typed hook (`message_received`, `session_start`, `session_end`, `before_model_resolve`, `before_prompt_build`, `llm_input`, `llm_output`, `model_call_started`, `model_call_ended`, `before_dispatch`, `reply_dispatch`, `before_tool_call`, `after_tool_call`, `tool_approval_resolution`, `tool_result_persist`, `message_sent`, `before_agent_finalize`, `agent_end`, `before_reset`, cron hooks, subagent hooks), event-stream hooks (`command:*`, `gateway:startup`), RPC method, CLI command, background service, and agent tool. |
-| `start()` | Async, once the gateway is ready | Build the OTel runtime (`initTelemetry` → TracerProvider + MeterProvider), optionally wrap LLM SDKs with OpenLLMetry when `traces` is on, and subscribe to OpenClaw diagnostic events for cost/token data. |
-| `stop()` | Async, on gateway reload or shutdown | Clear the stale-session sweeper `setInterval` (see [b668a4f](https://github.com/henrikrexed/openclaw-observability-plugin/commit/b668a4f), ISI-522), unsubscribe from diagnostics, and call `telemetry.shutdown()` so batched spans/metrics flush before the process exits. |
+| `register()` | Synchronous, before the gateway accepts traffic | Build or reuse the OTel runtime (`initTelemetry` → TracerProvider + MeterProvider), wire every typed hook (`message_received`, `session_start`, `session_end`, `before_model_resolve`, `before_prompt_build`, `llm_input`, `llm_output`, `model_call_started`, `model_call_ended`, `before_dispatch`, `reply_dispatch`, `before_tool_call`, `after_tool_call`, `tool_approval_resolution`, `tool_result_persist`, `message_sent`, `before_agent_finalize`, `agent_end`, `before_reset`, cron hooks, subagent hooks), event-stream hooks (`command:*`, `gateway:startup`), diagnostics listener, RPC method, CLI command, background service, and agent tool. |
+| `start()` | Async, once the gateway is ready | Perform gateway-only setup: publish content-capture env vars for subprocesses, warn on preload/config mismatches, and optionally wrap LLM SDKs with OpenLLMetry when `traces` is on. |
+| `stop()` | Async, on gateway reload or shutdown | Clear the stale-session sweeper `setInterval` (see [b668a4f](https://github.com/henrikrexed/openclaw-observability-plugin/commit/b668a4f), ISI-522), unsubscribe from diagnostics, shut down the log pipeline, and call `telemetry.flush()` so batched spans/metrics drain without destroying providers. |
+| `gateway_stop` | Final gateway lifecycle hook | Calls `telemetry.shutdown()` for destructive provider teardown, clears the metric heartbeat interval and preExit symbol, and releases the module-level runtime guard for a real process restart. |
 
 ### Lazy telemetry getter
 
-Hooks need to be registered in `register()` — which is synchronous and runs before `initTelemetry()` — but they need to read an OTel runtime that only exists after `start()`. The plugin solves this by registering hooks with a **lazy telemetry getter** instead of a concrete runtime:
+Hooks are registered in `register()` and resolve the current runtime with a **lazy telemetry getter** instead of closing over a stale concrete runtime:
 
 ```typescript
 let telemetry: TelemetryRuntime | null = null;
 
 // Registered in register(), resolves telemetry at call time.
-let stopHooks = registerHooks(api, () => telemetry, config);
+let stopHooks: (() => void) | null = null;
+let unsubscribeDiagnostics: (() => void) | null = null;
+
+telemetry = initTelemetry(config, logger);         // populated in register()
+stopHooks = registerHooks(api, () => telemetry, config);
+registerDiagnosticsListener(telemetry, logger).then((unsub) => {
+  unsubscribeDiagnostics = unsub;
+});
+api.on("gateway_stop", async () => {
+  await telemetry?.shutdown();                     // destructive finalizer
+  telemetry = null;
+});
 
 api.registerService({
   id: "otel-observability",
   start: async () => {
-    telemetry = initTelemetry(config, logger);     // populated here
     if (config.traces) await initOpenLLMetry(config, logger);
-    unsubscribeDiagnostics = await registerDiagnosticsListener(telemetry, logger);
   },
   stop: async () => {
     stopHooks?.();                                  // clearInterval
     unsubscribeDiagnostics?.();
-    await telemetry?.shutdown();
-    telemetry = null;
+    await telemetry?.flush();                       // non-destructive
   },
 });
 ```
@@ -185,7 +196,15 @@ const telemetry = getTelemetry();
 if (!telemetry) return;
 ```
 
-so any hook that fires between `register()` and `start()` completing is a clean no-op. Once `initTelemetry()` runs, the next invocation sees a live runtime and begins emitting spans.
+so hook handlers read whichever live runtime `register()` installed.
+
+### Hot reload vs. final shutdown
+
+OpenClaw uses the same service `stop()` callback for config hot-reload and ordinary gateway teardown, and the service context does not provide a reliable "final process exit" discriminator. This plugin therefore treats `stop()` as a hot-reload-safe drain, not a destructive provider shutdown.
+
+`initTelemetry()` is idempotent. During hot reload, the new `register()` call reuses the existing runtime rather than registering a second global TracerProvider or duplicating the metric heartbeat interval. This prevents silent telemetry loss after reload, but it also means trace/metric provider config changes do not take effect until the process restarts. Restart the gateway after changing endpoint, headers, protocol, service name, traces, metrics, sample rate, metrics interval, resource attributes, or preload-backed content capture. The metric heartbeat interval is unref'ed so it does not pin process exit; `gateway_stop` still performs explicit destructive shutdown when the host emits final gateway teardown.
+
+The runtime still exposes `shutdown()` for explicit destructive teardown in tests and `gateway_stop`. During normal operation, forced-exit callers should use `globalThis[Symbol.for("openclaw.otel.preExit")]` to flush before `process.exit()`; the plugin sets that symbol during telemetry initialization and clears it from `shutdown()`.
 
 ### How It Works
 
