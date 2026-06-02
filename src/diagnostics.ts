@@ -8,6 +8,9 @@
  */
 
 import type { Span } from "@opentelemetry/api";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import type { TelemetryRuntime } from "./telemetry.js";
 import {
   GEN_AI_CONVERSATION_ID,
@@ -44,26 +47,100 @@ async function loadSdk(): Promise<void> {
   }
 }
 
+type DiagnosticEventSource = (listener: (evt: any) => void) => () => void;
+type DiagnosticsLogger = { debug?: (message: string) => void };
+
 // Direct access to internal diagnostic events (preferred - bypasses SDK wrapper)
-let onInternalDiagnosticEvent: ((listener: (evt: any) => void) => () => void) | null = null;
+let onInternalDiagnosticEvent: DiagnosticEventSource | null = null;
 let internalLoadAttempted = false;
 
-async function loadInternalDiagnostics(): Promise<void> {
+function safeRealpath(file: string): string {
+  try {
+    return fs.realpathSync(file);
+  } catch {
+    return path.resolve(file);
+  }
+}
+
+function resolveInternalDiagnosticsDistCandidates(entryFile: string | undefined): string[] {
+  if (!entryFile) return [];
+  const resolvedEntry = safeRealpath(entryFile);
+  const entryDir = path.dirname(resolvedEntry);
+  const entryParent = path.basename(entryDir);
+  const installRoot = entryParent === "dist" || entryParent === "src"
+    ? path.dirname(entryDir)
+    : entryDir;
+  const candidates = entryParent === "dist"
+    ? [entryDir]
+    : [path.join(installRoot, "dist"), entryDir];
+  return [...new Set(candidates)];
+}
+
+function findInternalDiagnosticsChunks(
+  distCandidates: string[],
+): Array<{ distDir: string; chunk: string }> {
+  const matches: Array<{ distDir: string; chunk: string }> = [];
+  for (const distDir of distCandidates) {
+    let files: string[];
+    try {
+      files = fs.readdirSync(distDir);
+    } catch {
+      continue;
+    }
+    const chunks = files
+      .filter((f) => f.startsWith("diagnostic-events-") && f.endsWith(".js"))
+      .sort();
+    for (const file of chunks) {
+      matches.push({ distDir, chunk: file });
+    }
+  }
+  return matches;
+}
+
+function resolveInternalDiagnosticEventSource(diag: Record<string, unknown>): DiagnosticEventSource | null {
+  const direct = diag.onInternalDiagnosticEvent;
+  if (typeof direct === "function") return direct as DiagnosticEventSource;
+  const named = Object.values(diag).find(
+    (value) => typeof value === "function" && value.name === "onInternalDiagnosticEvent",
+  );
+  return typeof named === "function" ? named as DiagnosticEventSource : null;
+}
+
+async function loadInternalDiagnosticEventSource(
+  entryFile: string | undefined,
+  logger?: DiagnosticsLogger,
+): Promise<DiagnosticEventSource | null> {
+  const matches = findInternalDiagnosticsChunks(resolveInternalDiagnosticsDistCandidates(entryFile));
+  if (matches.length === 0) {
+    logger?.debug?.("[otel] Internal diagnostics chunk not found; falling back to SDK diagnostics");
+    return null;
+  }
+
+  for (const [index, match] of matches.entries()) {
+    const fallbackAction = index === matches.length - 1
+      ? "falling back to SDK diagnostics"
+      : "trying next diagnostics chunk";
+    try {
+      const specifier = pathToFileURL(path.join(match.distDir, match.chunk)).href;
+      const diag = await import(specifier) as Record<string, unknown>;
+      const eventSource = resolveInternalDiagnosticEventSource(diag);
+      if (eventSource) return eventSource;
+      logger?.debug?.(
+        `[otel] Internal diagnostics chunk ${match.chunk} loaded but onInternalDiagnosticEvent export not resolved; ${fallbackAction}`,
+      );
+    } catch {
+      logger?.debug?.(
+        `[otel] Internal diagnostics chunk ${match.chunk} failed to load; ${fallbackAction}`,
+      );
+    }
+  }
+  return null;
+}
+
+async function loadInternalDiagnostics(logger?: DiagnosticsLogger): Promise<void> {
   if (internalLoadAttempted) return;
   internalLoadAttempted = true;
-  try {
-    const fs = await import("fs");
-    const path = await import("path");
-    const ocDist = path.dirname(process.argv[1]);
-    const chunk = fs.readdirSync(ocDist).find((f: string) => f.startsWith("diagnostic-events-") && f.endsWith(".js"));
-    if (!chunk) return;
-    const diag = await import(path.join(ocDist, chunk)) as any;
-    onInternalDiagnosticEvent = diag.onInternalDiagnosticEvent
-      ?? Object.values(diag).find((v: any) => typeof v === "function" && v.name === "onInternalDiagnosticEvent") as any
-      ?? null;
-  } catch {
-    // Internal module not available
-  }
+  onInternalDiagnosticEvent = await loadInternalDiagnosticEventSource(process.argv[1], logger);
 }
 
 /** Pending usage data waiting to be attached to spans */
@@ -101,7 +178,7 @@ export async function registerDiagnosticsListener(
 ): Promise<() => void> {
   // Load the SDK if not already loaded
   await loadSdk();
-  await loadInternalDiagnostics();
+  await loadInternalDiagnostics(logger);
 
   // Use internal diagnostic events if available, otherwise fall back to SDK
   const eventSource = onInternalDiagnosticEvent || onDiagnosticEvent;
@@ -382,7 +459,7 @@ export function enrichSpanWithUsage(span: Span, data: PendingUsageData): void {
  * Note: Only accurate after registerDiagnosticsListener() has been called.
  */
 export function hasDiagnosticsSupport(): boolean {
-  return onDiagnosticEvent !== null;
+  return onInternalDiagnosticEvent !== null || onDiagnosticEvent !== null;
 }
 
 /**
