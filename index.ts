@@ -36,6 +36,9 @@ import { registerHooks } from "./src/hooks.js";
 import { registerDiagnosticsListener, hasDiagnosticsSupport } from "./src/diagnostics.js";
 import { initLogPipeline, bridgeGatewayLogger, type LogPipelineRuntime } from "./src/logs.js";
 
+let gatewayStopFinalizer: (() => Promise<void>) | null = null;
+let gatewayStopFinalizationStarted = false;
+
 // ── Public re-exports ───────────────────────────────────────────────
 // W3C trace context propagation helpers. Available without the plugin
 // register lifecycle so user code (custom RPC, message queues,
@@ -71,6 +74,15 @@ const otelObservabilityPlugin = {
     let unsubscribeDiagnostics: (() => void) | null = null;
     let stopHooks: (() => void) | null = null;
 
+    const shutdownTelemetry = async () => {
+      if (!telemetry) return;
+      await telemetry.shutdown();
+      telemetry = null;
+      logger.info("[otel] Telemetry shut down on gateway_stop");
+    };
+    gatewayStopFinalizer = shutdownTelemetry;
+    gatewayStopFinalizationStarted = false;
+
     // ── Telemetry + hooks (init at register() time) ─────────────────
     // Telemetry, the log pipeline, and hooks ALL run during register()
     // so they work in every OpenClaw context, not just the gateway:
@@ -99,6 +111,14 @@ const otelObservabilityPlugin = {
       }
 
       stopHooks = registerHooks(api, () => telemetry, config);
+      // `api.on` does not expose an unsubscribe handle. If a host retains
+      // old hook registrations across hot reloads, every registered wrapper
+      // shares this module-level guard and dispatches only the latest finalizer.
+      api.on?.("gateway_stop", async () => {
+        if (gatewayStopFinalizationStarted) return;
+        gatewayStopFinalizationStarted = true;
+        await gatewayStopFinalizer?.();
+      });
       logger.info("[otel] Telemetry + hooks initialized at register() (runner-compatible)");
     } catch (err) {
       logger.error(`[otel] Failed to initialize telemetry at register() time: ${String(err)}`);

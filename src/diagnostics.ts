@@ -27,9 +27,31 @@ import {
   TOKEN_TYPE_CACHE_CREATION,
 } from "./semconv.js";
 
+type DiagnosticEventSource = (listener: (evt: any) => void) => () => void;
+
 // Import from OpenClaw plugin SDK (loaded lazily)
-let onDiagnosticEvent: ((listener: (evt: any) => void) => () => void) | null = null;
+let onDiagnosticEvent: DiagnosticEventSource | null = null;
 let sdkLoadAttempted = false;
+
+function asDiagnosticEventSource(candidate: unknown): DiagnosticEventSource | null {
+  if (typeof candidate !== "function") return null;
+  try {
+    const unsubscribe = candidate(() => {});
+    if (typeof unsubscribe !== "function") return null;
+    unsubscribe();
+    return candidate as DiagnosticEventSource;
+  } catch {
+    return null;
+  }
+}
+
+function findDiagnosticEventSource(candidates: unknown[]): DiagnosticEventSource | null {
+  for (const candidate of candidates) {
+    const eventSource = asDiagnosticEventSource(candidate);
+    if (eventSource) return eventSource;
+  }
+  return null;
+}
 
 async function loadSdk(): Promise<void> {
   if (sdkLoadAttempted) return;
@@ -38,29 +60,61 @@ async function loadSdk(): Promise<void> {
     // Dynamic import to avoid build issues if SDK not available
     // @ts-ignore - openclaw/plugin-sdk types not available at build time
     const sdk = await import("openclaw/plugin-sdk") as any;
-    onDiagnosticEvent = sdk.onDiagnosticEvent;
+    onDiagnosticEvent = asDiagnosticEventSource(sdk.onDiagnosticEvent);
   } catch {
     // SDK not available — will use fallback token extraction
   }
 }
 
 // Direct access to internal diagnostic events (preferred - bypasses SDK wrapper)
-let onInternalDiagnosticEvent: ((listener: (evt: any) => void) => () => void) | null = null;
+let onInternalDiagnosticEvent: DiagnosticEventSource | null = null;
 let internalLoadAttempted = false;
 
 async function loadInternalDiagnostics(): Promise<void> {
   if (internalLoadAttempted) return;
   internalLoadAttempted = true;
   try {
+    // Prefer the stable package export when present. Older OpenClaw builds did
+    // not expose this path, so keep the packaged-chunk scan below as fallback.
+    // @ts-ignore - openclaw/plugin-sdk types not available at build time
+    const runtime = await import("openclaw/plugin-sdk/diagnostic-runtime") as any;
+    onInternalDiagnosticEvent = asDiagnosticEventSource(runtime.onInternalDiagnosticEvent);
+    if (onInternalDiagnosticEvent) return;
+  } catch {
+    // Stable diagnostic-runtime export not available.
+  }
+
+  try {
     const fs = await import("fs");
     const path = await import("path");
-    const ocDist = path.dirname(process.argv[1]);
-    const chunk = fs.readdirSync(ocDist).find((f: string) => f.startsWith("diagnostic-events-") && f.endsWith(".js"));
-    if (!chunk) return;
-    const diag = await import(path.join(ocDist, chunk)) as any;
-    onInternalDiagnosticEvent = diag.onInternalDiagnosticEvent
-      ?? Object.values(diag).find((v: any) => typeof v === "function" && v.name === "onInternalDiagnosticEvent") as any
-      ?? null;
+    const { pathToFileURL } = await import("url");
+    const argvEntry = process.argv[1];
+    if (!argvEntry) return;
+    const launcherDir = path.dirname(fs.realpathSync(path.resolve(argvEntry)));
+    const candidateDirs = Array.from(new Set([
+      launcherDir,
+      path.join(launcherDir, "dist"),
+    ]));
+
+    for (const candidateDir of candidateDirs) {
+      let chunks: string[];
+      try {
+        chunks = fs.readdirSync(candidateDir)
+          .filter((f: string) => f.startsWith("diagnostic-events-") && f.endsWith(".js"))
+          .sort();
+      } catch {
+        continue;
+      }
+
+      for (const chunk of chunks) {
+        const diag = await import(pathToFileURL(path.join(candidateDir, chunk)).href) as any;
+        onInternalDiagnosticEvent =
+          asDiagnosticEventSource(diag.onInternalDiagnosticEvent)
+          ?? asDiagnosticEventSource(diag.d)
+          ?? findDiagnosticEventSource(Object.values(diag));
+        if (onInternalDiagnosticEvent) return;
+      }
+    }
   } catch {
     // Internal module not available
   }
@@ -382,7 +436,7 @@ export function enrichSpanWithUsage(span: Span, data: PendingUsageData): void {
  * Note: Only accurate after registerDiagnosticsListener() has been called.
  */
 export function hasDiagnosticsSupport(): boolean {
-  return onDiagnosticEvent !== null;
+  return typeof onDiagnosticEvent === "function" || typeof onInternalDiagnosticEvent === "function";
 }
 
 /**
@@ -390,5 +444,6 @@ export function hasDiagnosticsSupport(): boolean {
  */
 export async function checkDiagnosticsSupport(): Promise<boolean> {
   await loadSdk();
-  return onDiagnosticEvent !== null;
+  await loadInternalDiagnostics();
+  return hasDiagnosticsSupport();
 }

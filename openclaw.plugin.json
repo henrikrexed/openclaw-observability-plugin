@@ -41,8 +41,17 @@
       "label": "Metrics Export Interval (ms)",
       "advanced": true
     },
+    "sampleRate": {
+      "label": "Trace Sampling Rate",
+      "help": "Optional head-based sampling rate from 0.0 to 1.0",
+      "advanced": true
+    },
     "resourceAttributes": {
       "label": "Extra Resource Attributes",
+      "advanced": true
+    },
+    "logConfig": {
+      "label": "Log Pipeline Filters",
       "advanced": true
     }
   },
@@ -124,12 +133,23 @@
         "minimum": 1000,
         "description": "Metrics export interval in milliseconds"
       },
+      "sampleRate": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Optional head-based trace sampling rate from 0.0 to 1.0"
+      },
       "resourceAttributes": {
         "type": "object",
         "additionalProperties": {
           "type": "string"
         },
         "description": "Additional OTel resource attributes"
+      },
+      "logConfig": {
+        "type": "object",
+        "additionalProperties": true,
+        "description": "Optional log pipeline filtering configuration"
       }
     }
   }
