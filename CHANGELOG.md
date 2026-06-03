@@ -4,6 +4,17 @@ All notable changes to the `@henrikrexed/openclaw-otel-observability` plugin are
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.6.0...v0.6.1) (2026-06-03)
+
+
+### Bug Fixes
+
+* **diagnostics:** portable internal diagnostic events loader ([0356fbb](https://github.com/henrikrexed/openclaw-observability-plugin/commit/0356fbbe6acc2959d2adbff32a358f9221347332))
+* **diagnostics:** portable internal diagnostic events loader ([86f5d04](https://github.com/henrikrexed/openclaw-observability-plugin/commit/86f5d045f938b5c81ef65200fb746babc358eae6))
+* **diagnostics:** portable internal diagnostic events loader ([8b40961](https://github.com/henrikrexed/openclaw-observability-plugin/commit/8b40961b49a4a0403cc21909d7301df2d228ed17))
+* preserve TracerProvider across config hot-reload ([ab05268](https://github.com/henrikrexed/openclaw-observability-plugin/commit/ab05268ba2545a41e21eac4a6445625d6a7c2dfc))
+* preserve TracerProvider across config hot-reload ([a230809](https://github.com/henrikrexed/openclaw-observability-plugin/commit/a230809273ede14c52f9a2877a4c53f55ca70f08))
+
 ## [0.6.0](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.5.0...v0.6.0) (2026-05-13)
 
 
