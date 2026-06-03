@@ -293,4 +293,34 @@ describe("internal diagnostics fallback logging", () => {
       `[otel] Internal diagnostics chunk ${chunk} failed to load; falling back to SDK diagnostics`,
     );
   });
+
+  it("supports minified listener aliases validated by shape", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export const state = { listener: null };
+      export function d(listener) {
+        state.listener = listener;
+        return () => undefined;
+      }\n`,
+    );
+
+    const { diagnostics } = await registerWithEntry(path.join(root, "openclaw.mjs"));
+
+    expect(diagnostics.hasDiagnosticsSupport()).toBe(true);
+  });
+
+  it("does not accept unrelated minified emitter exports as listener support", async () => {
+    const root = makeInstallRoot();
+    writeChunk(
+      root,
+      `export function o() {
+        return undefined;
+      }\n`,
+    );
+
+    const { diagnostics } = await registerWithEntry(path.join(root, "openclaw.mjs"));
+
+    expect(diagnostics.hasDiagnosticsSupport()).toBe(false);
+  });
 });

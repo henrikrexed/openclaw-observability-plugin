@@ -16,8 +16,26 @@ The plugin follows a two-track support model. Pick the plugin track that matches
 | `0.1.x`      | `< 2026.4.21`     | `release/0.1.x`  | Maintenance — security + critical regressions only        | Through **2026-10-21**                         |
 | `0.2.x`      | `>= 2026.4.21`    | `main`           | Superseded by 0.3.x                                      | Replaced by 0.3.x                             |
 | `0.3.x`      | `>= 2026.4.21`    | `main`           | Active — V3 features, log pipeline, bug fixes             | Default going forward                          |
+| `0.6.x`      | `>= 2026.5.13`    | `main`           | Active — Dashboard, diagnostics, token types, telemetry   | Latest release                                 |
 
 > OpenClaw `2026.4.21` introduced the `before_model_resolve` and `before_prompt_build` hooks and deprecated `before_agent_start`. The `0.2.x` line targets the new hooks; the `0.1.x` line remains on the legacy hook for existing deployments.
+
+## What's New in 0.6.0
+
+**Released:** 2026-05-13
+
+### Features
+- **Plugin-only dashboard** — Built-in dashboard using collected metrics, spans, and logs for quick observability without external tooling
+
+### Improvements
+- **Token types** — Added `cache_read` and `cache_creation` token types for `gen_ai.client.token.usage` histogram
+- **Diagnostics** — Improved diagnostic event handling with internal module fallback, debug logging, and health metrics wiring
+- **Telemetry** — Prevented double-registration breaking span parent chains
+- **Hooks** — Trace context store persistence across plugin reloads, error logging for `message_received`
+
+### Bug Fixes
+- Dashboard hostname filter corrections and CPU utilization metric fixes
+- Cache token type handling with proper defaults for missing data
 
 ## Two Approaches to Observability
 
@@ -131,7 +149,7 @@ OpenClaw has two hook registration moments, and the plugin uses both at the righ
 
 | Phase | Runs | What the plugin does |
 |---|---|---|
-| `register()` | Synchronous, before the gateway accepts traffic | Registers **all V3 typed hooks** via `api.on()` (see list below), plus event-stream hooks (`command:*`, `gateway:startup`), the `otel-observability.status` RPC, the `otel` CLI command, the background service, and the optional `otel_status` agent tool. Hooks receive a **lazy telemetry getter** (`() => telemetry`) so they can be wired before the OTel runtime exists. |
+| `register()` | Synchronous, before the gateway accepts traffic | Initializes the OTel runtime, log pipeline, **all V3 typed hooks** via `api.on()` (see list below), event-stream hooks (`command:*`, `gateway:startup`), the `otel-observability.status` RPC, the `otel` CLI command, the background service, diagnostics listener, and optional `otel_status` agent tool. Hooks receive a **lazy telemetry getter** (`() => telemetry`) so existing handlers keep using the live runtime across hot reload. |
 
 <details>
 <summary>Typed hooks registered in <code>register()</code></summary>
@@ -141,10 +159,18 @@ OpenClaw has two hook registration moments, and the plugin uses both at the righ
 **Orchestration hooks:** cron hooks (`cron_change`, `cron_execution`, `cron_error`), subagent hooks (`subagent_spawn`, `subagent_ended`)
 
 </details>
-| `start()` | Async, after the gateway is ready | Calls `initTelemetry()` to build the `TracerProvider`/`MeterProvider` and register them globally, initializes the OTLP log export pipeline, conditionally initializes OpenLLMetry wraps when `traces` is on, and subscribes to OpenClaw diagnostic events (`model.usage`, `log.record`) for cost/token data and log forwarding. |
-| `stop()` | Async, on gateway reload/shutdown | Clears the stale-session sweeper `setInterval`, unsubscribes from diagnostics, shuts down the log pipeline, and calls `telemetry.shutdown()` to flush exporters. |
+| `start()` | Async, after the gateway is ready | Performs gateway-only work: publishes content-capture env vars for subprocesses, warns on preload/config mismatches, and conditionally initializes OpenLLMetry wraps when `traces` is on. |
+| `stop()` | Async, on gateway reload/shutdown | Clears the stale-session sweeper `setInterval`, unsubscribes from diagnostics, shuts down the log pipeline, and calls `telemetry.flush()` so pending spans/metrics drain without destroying providers. |
 
-**Why this matters:** OpenClaw snapshots typed hooks at registration time. If hooks are registered from `start()` instead of `register()`, the gateway never sees them and **hooks register but never fire**. PR #6 (see [ISI-515](https://github.com/henrikrexed/openclaw-observability-plugin/pull/6)) moved them back to `register()` and introduced the lazy getter so handlers no-op cleanly during the brief `register()` → `start()` window.
+### Hot reload and final flush behavior
+
+OpenClaw config hot-reload calls `stop()` and then `register()` in the same process. The plugin treats `stop()` as a non-destructive drain: it calls `forceFlush()` on trace and metric providers, but keeps the providers alive so hooks that still reference the existing runtime continue to export telemetry after reload.
+
+That tradeoff preserves data, but trace/metric provider config changes do not rebuild the live providers until a full process restart. Changes to `endpoint`, `headers`, `protocol`, `serviceName`, `traces`, `metrics`, `sampleRate`, `metricsIntervalMs`, `resourceAttributes`, and preload-backed content capture can be parsed during reload, but the existing trace/metric runtime keeps using the values it was initialized with. Restart the gateway when changing those settings. The log pipeline is recreated on service `stop()`/`register()` reload, so `logs` and `logConfig` changes can take effect through the plugin reload path.
+
+For `--local` and other code paths that call `process.exit()` before the batch processor interval fires, the plugin publishes `globalThis[Symbol.for("openclaw.otel.preExit")]`. The plugin sets that symbol to a non-destructive flush function during telemetry initialization and clears it from `shutdown()`. CLI exit handlers own calling it before forced exit.
+
+**Why this matters:** OpenClaw snapshots typed hooks at registration time. If hooks are registered from `start()` instead of `register()`, the gateway never sees them and **hooks register but never fire**. PR #6 (see [ISI-515](https://github.com/henrikrexed/openclaw-observability-plugin/pull/6)) moved them back to `register()`, and current builds initialize telemetry in `register()` while using the lazy getter so hot-reload handlers keep resolving the live runtime.
 
 ### Installation
 
@@ -289,6 +315,7 @@ In your backend, look for an `openclaw.request` span with at least one `openclaw
 | **Security detection** | No | Prompt injection, dangerous commands |
 | **Cron monitoring** | No | Cron change/execution/error spans |
 | **Sub-agent tracking** | No | Spawn/duration/ended spans |
+| **Dashboard** | No | Plugin-only dashboard with metrics/spans/logs |
 | Setup complexity | Config only | Plugin installation |
 
 ---
@@ -358,7 +385,9 @@ In your backend, look for an `openclaw.request` span with at least one `openclaw
 
 ## Configuration Reference
 
-### Official Plugin Options
+### Built-in OpenClaw Diagnostics Options
+
+These keys configure OpenClaw core's built-in diagnostics exporter. They are not the config surface for this custom hook-based plugin.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -371,24 +400,44 @@ In your backend, look for an `openclaw.request` span with at least one `openclaw
 | `diagnostics.otel.traces` | boolean | true | Enable traces |
 | `diagnostics.otel.metrics` | boolean | true | Enable metrics |
 | `diagnostics.otel.logs` | boolean | false | Enable logs |
-| `diagnostics.otel.sampleRate` | number | (unset) | Head-based trace sampling rate, 0.0–1.0. Wraps `TraceIdRatioBasedSampler` in `ParentBasedSampler` so child spans inherit the root decision. Omit (or use `1.0`) to keep all traces. **Overrides `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG`** — the plugin builds the sampler directly and never reads those env vars; see [Trace Sampling](docs/configuration.md#trace-sampling) for precedence rules. |
+| `diagnostics.otel.sampleRate` | number | (unset) | Built-in diagnostics trace sampling, if supported by your OpenClaw version. This custom plugin uses `plugins.entries.otel-observability.config.sampleRate` below. |
 
 ### Custom Plugin Options
 
-> **Important:** Do NOT add a `config` block inside the plugin entry — OpenClaw's plugin framework rejects unknown properties. The plugin reads its configuration from the `diagnostics.otel` section instead.
+This plugin reads its settings from `plugins.entries.otel-observability.config`:
 
-The following settings are controlled via the `diagnostics.otel` config block:
+```json
+{
+  "plugins": {
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "config": {
+          "endpoint": "http://localhost:4318",
+          "protocol": "http",
+          "serviceName": "openclaw-gateway"
+        }
+      }
+    }
+  }
+}
+```
+
+The following settings are controlled via that plugin entry `config` block:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `endpoint` | string | `http://localhost:4318` | OTLP endpoint URL |
 | `serviceName` | string | `openclaw-gateway` | Service name |
-| `protocol` | string | `http/protobuf` | OTLP protocol (`http` or `grpc`) |
+| `protocol` | string | `http` | OTLP protocol (`http` or `grpc`) |
 | `traces` | boolean | true | Enable traces |
 | `metrics` | boolean | true | Enable metrics |
 | `logs` | boolean | true | Enable OTLP log export via diagnostic events |
 | `captureContent` | boolean \| `ContentCapturePolicy` | `false` (all off) | Capture prompt/completion/tool content on spans. Accepts a boolean (all-on or all-off, legacy) or a granular object with the per-category flags `inputMessages`, `outputMessages`, `toolInputs`, `toolOutputs`, `systemPrompt`. Privacy-sensitive — see [docs/security/privacy.md](./docs/security/privacy.md). |
 | `metricsIntervalMs` | number | 30000 | Metric export interval in milliseconds |
+| `sampleRate` | number | unset | Head-based trace sampling rate, 0.0-1.0. Omit to use the SDK default. |
+| `resourceAttributes` | object | `{}` | Extra OpenTelemetry resource attributes |
+| `logConfig` | object | unset | Log pipeline filtering and exclusion rules |
 
 ### Log Pipeline Configuration
 

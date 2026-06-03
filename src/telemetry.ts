@@ -128,6 +128,9 @@ export interface TelemetryRuntime {
   histograms: OtelHistograms;
   gauges: OtelGauges;
   shutdown: () => Promise<void>;
+  /** Flush pending spans/metrics without destroying the providers. Safe to
+   *  call on hot-reload — providers remain usable after flush returns. */
+  flush: () => Promise<void>;
 }
 
 export interface OtelCounters {
@@ -260,6 +263,33 @@ export interface OtelGauges {
 let initializedRuntime: TelemetryRuntime | null = null;
 let tracerProviderRef: NodeTracerProvider | null = null;
 
+type FlushableProvider = {
+  forceFlush: () => Promise<void>;
+};
+
+function getFlushableGlobalTracerProvider(): FlushableProvider | undefined {
+  try {
+    const provider = trace.getTracerProvider() as unknown as {
+      forceFlush?: () => Promise<void>;
+      getDelegate?: () => unknown;
+    };
+    const delegate =
+      typeof provider.getDelegate === "function"
+        ? provider.getDelegate()
+        : provider;
+    if (
+      delegate &&
+      typeof (delegate as { forceFlush?: unknown }).forceFlush === "function"
+    ) {
+      return delegate as FlushableProvider;
+    }
+  } catch {
+    // If the global provider cannot be inspected, fall back to the plugin
+    // provider below (if any). Flush is best-effort and must not break OC.
+  }
+  return undefined;
+}
+
 export function initTelemetry(config: OtelObservabilityConfig, logger: any): TelemetryRuntime {
   // Idempotent: if we already initialized, reuse the existing runtime.
   // This prevents tracerProvider.register() from being called multiple
@@ -300,6 +330,7 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
   // ── Tracing ─────────────────────────────────────────────────────
 
   let tracerProvider: NodeTracerProvider | undefined;
+  let preloadedTracerProvider: FlushableProvider | undefined;
 
   if (config.traces) {
     if (hasPreloadedOtelSdk()) {
@@ -308,6 +339,7 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       // the preload's, dropping GenAI auto-instrumentation spans. Reuse the
       // existing global provider — trace.getTracer() below will return a
       // tracer backed by it.
+      preloadedTracerProvider = getFlushableGlobalTracerProvider();
       logger.info("[otel] Reusing preloaded OpenTelemetry SDK (skipping plugin TracerProvider registration)");
     } else {
       if (readPreloadHint()) {
@@ -674,25 +706,88 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       // Never let metric heartbeat errors affect the gateway
     }
   }, config.metricsIntervalMs || 30_000); // Match the export interval
+  if (typeof (metricHeartbeatInterval as { unref?: () => void }).unref === "function") {
+    (metricHeartbeatInterval as { unref: () => void }).unref();
+  }
 
-  // ── Shutdown ────────────────────────────────────────────────────
+  // ── Flush (non-destructive) ──────────────────────────────────────
+  // Drains pending spans and metrics to the collector without destroying
+  // the providers. Safe to call on config hot-reload — the providers
+  // remain usable after flush returns. Also exposed via a well-known
+  // global Symbol so the CLI exit handler can flush before process.exit()
+  // in --local mode (where BatchSpanProcessor would otherwise lose its
+  // queue).
 
-  const shutdown = async () => {
-    logger.info("[otel] Shutting down telemetry...");
-    clearInterval(metricHeartbeatInterval);
+  const FLUSH_TIMEOUT_MS = 3_000;
+
+  const flushWithTimeout = async (label: string, fn: () => Promise<void>) => {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      if (tracerProvider) await tracerProvider.shutdown();
-      if (meterProvider) await meterProvider.shutdown();
+      await Promise.race([
+        fn(),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error(`${label} flush timed out after ${FLUSH_TIMEOUT_MS}ms`)),
+            FLUSH_TIMEOUT_MS,
+          );
+        }),
+      ]);
     } catch (err) {
-      logger.error(`[otel] Shutdown error: ${err instanceof Error ? err.message : String(err)}`);
+      logger.warn?.(
+        `[otel] ${label} flush warning: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
-      // Clear module-level refs so a legitimate restart can re-register.
-      initializedRuntime = null;
-      tracerProviderRef = null;
+      if (timeout) clearTimeout(timeout);
     }
   };
 
-  const runtime: TelemetryRuntime = { tracer, meter, counters, histograms, gauges, shutdown };
+  const flush = async () => {
+    const flushableTracerProvider =
+      tracerProvider ?? preloadedTracerProvider;
+    await Promise.all([
+      flushableTracerProvider
+        ? flushWithTimeout("trace", () => flushableTracerProvider.forceFlush())
+        : Promise.resolve(),
+      meterProvider
+        ? flushWithTimeout("metric", () =>
+            meterProvider.forceFlush({ timeoutMillis: FLUSH_TIMEOUT_MS }),
+          )
+        : Promise.resolve(),
+    ]);
+  };
+
+  (globalThis as any)[Symbol.for("openclaw.otel.preExit")] = flush;
+
+  // ── Shutdown (destructive — process exit only) ─────────────────
+
+  let shutdownPromise: Promise<void> | null = null;
+
+  const shutdown = async () => {
+    if (shutdownPromise) return shutdownPromise;
+    shutdownPromise = (async () => {
+      logger.info("[otel] Shutting down telemetry...");
+      clearInterval(metricHeartbeatInterval);
+      (globalThis as any)[Symbol.for("openclaw.otel.preExit")] = undefined;
+      try {
+        const results = await Promise.allSettled([
+          tracerProvider ? tracerProvider.shutdown() : Promise.resolve(),
+          meterProvider ? meterProvider.shutdown() : Promise.resolve(),
+        ]);
+        for (const result of results) {
+          if (result.status === "rejected") {
+            const err = result.reason;
+            logger.error(`[otel] Shutdown error: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+      } finally {
+        initializedRuntime = null;
+        tracerProviderRef = null;
+      }
+    })();
+    return shutdownPromise;
+  };
+
+  const runtime: TelemetryRuntime = { tracer, meter, counters, histograms, gauges, shutdown, flush };
   initializedRuntime = runtime;
   return runtime;
 }

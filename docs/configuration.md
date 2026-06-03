@@ -1,26 +1,29 @@
 # Configuration
 
-Configure OpenClaw's built-in OpenTelemetry diagnostics via `~/.openclaw/openclaw.json`.
+Configure the custom hook-based OTel observability plugin via `~/.openclaw/openclaw.json`.
 
 ## Full Configuration Example
 
 ```json
 {
-  "diagnostics": {
-    "enabled": true,
-    "otel": {
-      "enabled": true,
-      "endpoint": "http://localhost:4318",
-      "protocol": "http/protobuf",
-      "headers": {
-        "Authorization": "Api-Token dt0c01.xxx"
-      },
-      "serviceName": "openclaw-gateway",
-      "traces": true,
-      "metrics": true,
-      "logs": true,
-      "sampleRate": 1.0,
-      "flushIntervalMs": 5000
+  "plugins": {
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "config": {
+          "endpoint": "http://localhost:4318",
+          "protocol": "http",
+          "headers": {
+            "Authorization": "Api-Token dt0c01.xxx"
+          },
+          "serviceName": "openclaw-gateway",
+          "traces": true,
+          "metrics": true,
+          "logs": true,
+          "sampleRate": 1.0,
+          "metricsIntervalMs": 30000
+        }
+      }
     }
   }
 }
@@ -28,30 +31,24 @@ Configure OpenClaw's built-in OpenTelemetry diagnostics via `~/.openclaw/opencla
 
 ## Configuration Reference
 
-### `diagnostics`
+### `plugins.entries.otel-observability.config`
 
-Top-level diagnostics configuration.
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `enabled` | boolean | `false` | Enable the diagnostics system |
-
-### `diagnostics.otel`
-
-OpenTelemetry export configuration.
+Plugin entry configuration.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `enabled` | boolean | `false` | Enable OTel export |
-| `endpoint` | string | — | OTLP endpoint URL (required) |
-| `protocol` | string | `"http/protobuf"` | Protocol: `"http/protobuf"` or `"grpc"` |
+| `endpoint` | string | `"http://localhost:4318"` | OTLP endpoint URL |
+| `protocol` | string | `"http"` | Protocol: `"http"` or `"grpc"` |
 | `headers` | object | `{}` | Custom HTTP headers (e.g., auth tokens) |
-| `serviceName` | string | `"openclaw"` | OTel service name attribute |
+| `serviceName` | string | `"openclaw-gateway"` | OTel service name attribute |
 | `traces` | boolean | `true` | Enable trace export |
 | `metrics` | boolean | `true` | Enable metrics export |
-| `logs` | boolean | `false` | Enable log forwarding |
+| `logs` | boolean | `true` | Enable log forwarding |
 | `sampleRate` | number | — | Trace sampling rate, `0.0`–`1.0`. Omit to use the SDK default (`parentbased_always_on`). **Overrides `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG`** — see [Trace Sampling](#trace-sampling) for precedence rules. |
-| `flushIntervalMs` | number | — | Export flush interval in milliseconds |
+| `metricsIntervalMs` | number | `30000` | Metrics export interval in milliseconds |
+| `captureContent` | boolean \| object | `false` | Span content capture policy |
+| `resourceAttributes` | object | `{}` | Extra OpenTelemetry resource attributes |
+| `logConfig` | object | — | Log filtering and exclusion rules |
 
 ## Endpoint Configuration
 
@@ -61,12 +58,15 @@ For OTLP/HTTP endpoints (port 4318):
 
 ```json
 {
-  "diagnostics": {
-    "enabled": true,
-    "otel": {
-      "enabled": true,
-      "endpoint": "http://localhost:4318",
-      "protocol": "http/protobuf"
+  "plugins": {
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "config": {
+          "endpoint": "http://localhost:4318",
+          "protocol": "http"
+        }
+      }
     }
   }
 }
@@ -80,12 +80,15 @@ For OTLP/gRPC endpoints (port 4317):
 
 ```json
 {
-  "diagnostics": {
-    "enabled": true,
-    "otel": {
-      "enabled": true,
-      "endpoint": "http://localhost:4317",
-      "protocol": "grpc"
+  "plugins": {
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "config": {
+          "endpoint": "http://localhost:4317",
+          "protocol": "grpc"
+        }
+      }
     }
   }
 }
@@ -152,12 +155,15 @@ Control trace sampling rate to reduce volume:
 
 ```json
 {
-  "diagnostics": {
-    "enabled": true,
-    "otel": {
-      "enabled": true,
-      "endpoint": "http://localhost:4318",
-      "sampleRate": 0.1
+  "plugins": {
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "config": {
+          "endpoint": "http://localhost:4318",
+          "sampleRate": 0.1
+        }
+      }
     }
   }
 }
@@ -243,9 +249,14 @@ The plugin exports 100% of traces by default. For high-traffic gateways this can
 
 ```json
 {
-  "diagnostics": {
-    "otel": {
-      "sampleRate": 0.1
+  "plugins": {
+    "entries": {
+      "otel-observability": {
+        "enabled": true,
+        "config": {
+          "sampleRate": 0.1
+        }
+      }
     }
   }
 }
@@ -266,7 +277,7 @@ Invalid values (negative, > 1, `NaN`, non-numeric, `null`, plain object) are ign
 
 OpenTelemetry SDKs typically read the `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG` environment variables to choose a default sampler. **This plugin does not.** When `sampleRate` is set in plugin config, the plugin builds the sampler directly (`ParentBased(TraceIdRatio(sampleRate))`) and the env vars have no effect on the plugin's tracer provider. When `sampleRate` is omitted, the plugin omits the `sampler` key entirely so the SDK's default (`parentbased_always_on`) applies — and even in that case, the plugin does not propagate `OTEL_TRACES_SAMPLER` to its provider.
 
-Operators migrating from other OTel SDKs should configure sampling via `diagnostics.otel.sampleRate` rather than the env vars. The precedence is:
+Operators migrating from other OTel SDKs should configure sampling via `plugins.entries.otel-observability.config.sampleRate` rather than the env vars. The precedence is:
 
 | Configuration                                                  | Effective sampler                                          |
 | -------------------------------------------------------------- | ---------------------------------------------------------- |
@@ -299,6 +310,34 @@ LLM-client spans emitted by Traceloop (`@traceloop/instrumentation-anthropic`, `
 ### Not hot-reloadable
 
 `captureContent` is a **gateway-launch setting**, not a hot-reloadable plugin option, because the ESM preload (`instrumentation/preload.mjs`) instantiates `AnthropicInstrumentation` and `OpenAIInstrumentation` *before* OpenClaw parses plugin config. Changing the value in `openclaw.json` mid-run has no effect until the next gateway restart.
+
+The telemetry providers themselves are also preserved across config hot-reload. OpenClaw calls the plugin service `stop()` before `register()` during reload; this plugin treats `stop()` as a non-destructive drain and calls `forceFlush()` instead of `shutdown()` so the live TracerProvider/MeterProvider keep exporting spans and metrics after reload.
+
+Because the runtime is reused, changes to telemetry-affecting fields do not take effect until a full gateway restart:
+
+- `endpoint`
+- `headers`
+- `protocol`
+- `serviceName`
+- `traces`
+- `metrics`
+- `sampleRate`
+- `metricsIntervalMs`
+- `resourceAttributes`
+- preload-backed content capture (`captureContent` for Traceloop LLM-client spans)
+
+This is intentional: stale telemetry config is preferable to dropping all post-reload spans. Restart the gateway after changing any of those fields. The log pipeline is rebuilt during service `stop()`/`register()` reloads, so `logs` and `logConfig` can take effect through the plugin reload path.
+
+### `openclaw.otel.preExit`
+
+The plugin publishes a loose pre-exit contract for OpenClaw code paths that call `process.exit()` before the BatchSpanProcessor export interval fires:
+
+```typescript
+const preExit = globalThis[Symbol.for("openclaw.otel.preExit")];
+if (typeof preExit === "function") await preExit();
+```
+
+The plugin sets the symbol to a non-destructive flush function during telemetry initialization and clears it from `shutdown()`. CLI exit handlers own calling it before forced exit.
 
 ### How to enable content capture
 
@@ -387,17 +426,13 @@ Leave `captureContent` at `false` unless you control the backend and understand 
 
 ## Applying Changes
 
-After modifying configuration:
+After modifying trace/metric provider configuration:
 
 ```bash
 openclaw gateway restart
 ```
 
-Or trigger a hot reload (if supported):
-
-```bash
-kill -SIGUSR1 $(pgrep -f openclaw-gateway)
-```
+Plugin hot reload can apply log pipeline changes (`logs` and `logConfig`), but it does not rebuild the trace or metric providers listed above.
 
 ## Troubleshooting
 

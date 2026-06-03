@@ -151,6 +151,7 @@ function createTelemetry(): { telemetry: TelemetryRuntime; spans: Array<Span & S
       activeSessions: noopUpDownCounter(),
     } as unknown as TelemetryRuntime["gauges"],
     shutdown: async () => {},
+    flush: async () => {},
   };
   return { telemetry, spans };
 }
@@ -1092,7 +1093,9 @@ describe("before_tool_call / after_tool_call hooks (ISI-927)", () => {
       { sessionKey: "s6", agentId: "a1" },
     );
 
-    expect(spans.length).toBe(2); // agent.turn + execute_tool
+    const toolSpanBeforePersist = spans.find((s) => s.spanName === "execute_tool Read");
+    expect(toolSpanBeforePersist).toBeDefined();
+    const spanCountBeforePersist = spans.length;
 
     toolPersist(
       {
@@ -1106,11 +1109,10 @@ describe("before_tool_call / after_tool_call hooks (ISI-927)", () => {
       { sessionKey: "s6", agentId: "a1" },
     );
 
-    expect(spans.length).toBe(2); // No new span created
+    expect(spans.length).toBe(spanCountBeforePersist); // No new span created
+    expect(spans.find((s) => s.spanName === "execute_tool Read")).toBe(toolSpanBeforePersist);
 
-    const toolSpan = spans.find((s) => s.spanName === "execute_tool Read");
-    expect(toolSpan).toBeDefined();
-    expect(toolSpan!.attrs["openclaw.tool.result_chars"]).toBe("127.0.0.1 localhost".length);
+    expect(toolSpanBeforePersist!.attrs["openclaw.tool.result_chars"]).toBe("127.0.0.1 localhost".length);
 
     stopHooks();
   });
@@ -2792,4 +2794,3 @@ describe("ISI-1004: diagnostics.enrichSpanWithUsage legacy removal (schema 1.3.0
     expect(spy.attrs["gen_ai.usage.total_tokens"]).toBeUndefined();
   });
 });
-
