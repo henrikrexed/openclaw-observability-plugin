@@ -1016,6 +1016,137 @@ describe("before_tool_call / after_tool_call hooks (ISI-927)", () => {
     stopHooks();
   });
 
+  it("after_tool_call stamps error_preview when toolErrorMessages=true (default)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, configWithPolicy({ toolErrorMessages: true }));
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const beforeTool = typedHooks.get("before_tool_call")!;
+    const afterTool = typedHooks.get("after_tool_call")!;
+
+    resolve({}, { agentId: "a1", sessionKey: "s-err1" });
+    beforeTool({ toolName: "Bash", toolCallId: "tc-err1" }, { sessionKey: "s-err1", agentId: "a1" });
+    afterTool(
+      {
+        toolName: "Bash",
+        toolCallId: "tc-err1",
+        message: {
+          is_error: true,
+          content: [{ type: "text", text: "command not found: foobar" }],
+        },
+      },
+      { sessionKey: "s-err1" },
+    );
+
+    const toolSpan = spans.find((s) => s.spanName === "execute_tool Bash");
+    expect(toolSpan).toBeDefined();
+    expect(toolSpan!.attrs["openclaw.tool.error_preview"]).toContain("command not found");
+
+    stopHooks();
+  });
+
+  it("after_tool_call suppresses error_preview when toolErrorMessages=false", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, configWithPolicy({ toolErrorMessages: false }));
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const beforeTool = typedHooks.get("before_tool_call")!;
+    const afterTool = typedHooks.get("after_tool_call")!;
+
+    resolve({}, { agentId: "a1", sessionKey: "s-err2" });
+    beforeTool({ toolName: "Bash", toolCallId: "tc-err2" }, { sessionKey: "s-err2", agentId: "a1" });
+    afterTool(
+      {
+        toolName: "Bash",
+        toolCallId: "tc-err2",
+        message: {
+          is_error: true,
+          content: [{ type: "text", text: "secret_token=abc123 failed" }],
+        },
+      },
+      { sessionKey: "s-err2" },
+    );
+
+    const toolSpan = spans.find((s) => s.spanName === "execute_tool Bash");
+    expect(toolSpan).toBeDefined();
+    expect(toolSpan!.attrs["openclaw.tool.error_preview"]).toBeUndefined();
+
+    stopHooks();
+  });
+
+  it("after_tool_call truncates error_preview at 1024 chars with marker", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, configWithPolicy({ toolErrorMessages: true }));
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const beforeTool = typedHooks.get("before_tool_call")!;
+    const afterTool = typedHooks.get("after_tool_call")!;
+
+    resolve({}, { agentId: "a1", sessionKey: "s-err3" });
+    beforeTool({ toolName: "Bash", toolCallId: "tc-err3" }, { sessionKey: "s-err3", agentId: "a1" });
+    const longError = "x".repeat(2000);
+    afterTool(
+      {
+        toolName: "Bash",
+        toolCallId: "tc-err3",
+        message: {
+          is_error: true,
+          content: [{ type: "text", text: longError }],
+        },
+      },
+      { sessionKey: "s-err3" },
+    );
+
+    const toolSpan = spans.find((s) => s.spanName === "execute_tool Bash");
+    expect(toolSpan).toBeDefined();
+    const preview = toolSpan!.attrs["openclaw.tool.error_preview"] as string;
+    expect(preview).toBeDefined();
+    expect(preview.length).toBeLessThan(2000);
+    expect(preview).toContain("truncated");
+
+    stopHooks();
+  });
+
+  it("after_tool_call redacts secrets before truncating error_preview", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, configWithPolicy({ toolErrorMessages: true }));
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const beforeTool = typedHooks.get("before_tool_call")!;
+    const afterTool = typedHooks.get("after_tool_call")!;
+
+    resolve({}, { agentId: "a1", sessionKey: "s-err4" });
+    beforeTool({ toolName: "Bash", toolCallId: "tc-err4" }, { sessionKey: "s-err4", agentId: "a1" });
+    // Build a string where a secret straddles the 1024-char boundary.
+    // If redaction ran after truncation, the token prefix would survive.
+    const prefix = "a".repeat(1020);
+    const secret = "ANTHROPIC_API_KEY=sk-ant-" + "x".repeat(40);
+    const errorText = prefix + secret;
+    afterTool(
+      {
+        toolName: "Bash",
+        toolCallId: "tc-err4",
+        message: {
+          is_error: true,
+          content: [{ type: "text", text: errorText }],
+        },
+      },
+      { sessionKey: "s-err4" },
+    );
+
+    const toolSpan = spans.find((s) => s.spanName === "execute_tool Bash");
+    expect(toolSpan).toBeDefined();
+    const preview = toolSpan!.attrs["openclaw.tool.error_preview"] as string;
+    // The raw key value should not appear in the preview.
+    expect(preview).not.toContain("sk-ant-");
+
+    stopHooks();
+  });
+
   it("before_tool_call records approval request attributes", () => {
     const { api, typedHooks } = createStubApi();
     const { telemetry, spans } = createTelemetry();

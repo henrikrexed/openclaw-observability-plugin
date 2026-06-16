@@ -36,7 +36,7 @@ describe("parseConfig — content capture policy", () => {
     expect(cfg.captureContent).toEqual(CONTENT_POLICY_DISABLED);
   });
 
-  it("accepts partial object form and fills missing flags as false", () => {
+  it("accepts partial object form and fills missing flags as false (toolErrorMessages defaults true)", () => {
     const cfg = parseConfig({
       captureContent: { inputMessages: true, toolOutputs: true },
     });
@@ -44,6 +44,7 @@ describe("parseConfig — content capture policy", () => {
       ...CONTENT_POLICY_DISABLED,
       inputMessages: true,
       toolOutputs: true,
+      toolErrorMessages: true,
     });
   });
 
@@ -54,6 +55,7 @@ describe("parseConfig — content capture policy", () => {
     expect(cfg.captureContent).toEqual({
       ...CONTENT_POLICY_DISABLED,
       inputMessages: true,
+      toolErrorMessages: true,
     });
   });
 
@@ -70,7 +72,15 @@ describe("parseConfig — content capture policy", () => {
     expect(cfg.captureContent).toEqual({
       ...CONTENT_POLICY_DISABLED,
       toolOutputs: true,
+      toolErrorMessages: true,
     });
+  });
+
+  it("allows explicit toolErrorMessages: false to suppress error previews", () => {
+    const cfg = parseConfig({
+      captureContent: { toolErrorMessages: false },
+    });
+    expect(cfg.captureContent.toolErrorMessages).toBe(false);
   });
 
   it("rejects arrays and falls back to disabled policy", () => {

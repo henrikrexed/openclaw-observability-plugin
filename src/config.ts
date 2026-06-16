@@ -13,8 +13,13 @@
  *                      (`openclaw.content.output_message`)
  *   - toolInputs     → tool-call input arguments
  *                      (`openclaw.content.tool_input`)
- *   - toolOutputs    → tool-call result text
- *                      (`openclaw.content.tool_output`)
+ *   - toolOutputs        → tool-call result text
+ *                          (`openclaw.content.tool_output`)
+ *   - toolErrorMessages  → bounded, redacted error text from failed tool calls
+ *                          (`openclaw.tool.error_preview`); defaults to true
+ *                          even when other flags are off because error messages
+ *                          are operational data, not full content capture.
+ *                          Set to false to suppress entirely.
  *   - systemPrompt   → system prompt text
  *                      (`openclaw.content.system_prompt`)
  *
@@ -32,6 +37,7 @@ export interface ContentCapturePolicy {
   outputMessages: boolean;
   toolInputs: boolean;
   toolOutputs: boolean;
+  toolErrorMessages: boolean;
   systemPrompt: boolean;
 }
 
@@ -87,6 +93,7 @@ export const CONTENT_POLICY_DISABLED: ContentCapturePolicy = Object.freeze({
   outputMessages: false,
   toolInputs: false,
   toolOutputs: false,
+  toolErrorMessages: false,
   systemPrompt: false,
 });
 
@@ -95,6 +102,7 @@ export const CONTENT_POLICY_ENABLED: ContentCapturePolicy = Object.freeze({
   outputMessages: true,
   toolInputs: true,
   toolOutputs: true,
+  toolErrorMessages: true,
   systemPrompt: true,
 });
 
@@ -135,7 +143,9 @@ export function normalizeContentCapturePolicy(
   }
 
   const obj = input as Record<string, unknown>;
-  const policy: ContentCapturePolicy = { ...CONTENT_POLICY_DISABLED };
+  // toolErrorMessages defaults to true (operational data, different privacy
+  // class from full content capture) unless the caller explicitly sets it.
+  const policy: ContentCapturePolicy = { ...CONTENT_POLICY_DISABLED, toolErrorMessages: true };
   for (const key of Object.keys(CONTENT_POLICY_DISABLED) as Array<
     keyof ContentCapturePolicy
   >) {
