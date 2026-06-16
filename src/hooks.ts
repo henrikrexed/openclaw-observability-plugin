@@ -226,6 +226,19 @@ export function registerHooks(
     setRedactedAttribute(span, key, text);
   }
 
+  // Stamp a bounded, redacted error preview on the span regardless of the
+  // toolOutputs policy. Redact BEFORE truncating (redact-before-truncate rule).
+  function setToolErrorPreview(span: any, message: any): void {
+    if (!contentPolicy.toolErrorMessages) return;
+    const raw = extractToolOutputText(message);
+    if (!raw) return;
+    const redacted = redactSensitiveText(raw);
+    const preview = redacted.length > 1024
+      ? `${redacted.slice(0, 1024)}…(truncated, ${redacted.length - 1024} more chars)`
+      : redacted;
+    setRedactedAttribute(span, "openclaw.tool.error_preview", preview);
+  }
+
   function extractToolOutputText(message: any): string | undefined {
     if (!message) return undefined;
     if (typeof message === "string") return message;
@@ -1199,6 +1212,7 @@ export function registerHooks(
             });
             span.setAttribute(ERROR_TYPE, "tool_execution_error");
             span.setStatus({ code: SpanStatusCode.ERROR, message: "Tool execution error" });
+            setToolErrorPreview(span, message);
           } else {
             span.setStatus({ code: SpanStatusCode.OK });
           }
@@ -1355,6 +1369,7 @@ export function registerHooks(
             if (message?.is_error === true || message?.isError === true) {
               span.setAttribute(ERROR_TYPE, "tool_execution_error");
               span.setStatus({ code: SpanStatusCode.ERROR, message: "Tool execution error" });
+              setToolErrorPreview(span, message);
             }
           }
 
@@ -1436,6 +1451,7 @@ export function registerHooks(
             });
             span.setAttribute(ERROR_TYPE, "tool_execution_error");
             span.setStatus({ code: SpanStatusCode.ERROR, message: "Tool execution error" });
+            setToolErrorPreview(span, message);
           } else if (!securityEvent) {
             span.setStatus({ code: SpanStatusCode.OK });
           }
