@@ -4,6 +4,14 @@ All notable changes to the `@henrikrexed/openclaw-otel-observability` plugin are
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.6.1...v0.7.0) (2026-06-17)
+
+
+### Features
+
+* **ISI-1318:** bounded redacted error_preview on failed tool spans ([bebeafe](https://github.com/henrikrexed/openclaw-observability-plugin/commit/bebeafef30f6953fb2b528e768568c6d5585e19c))
+* **ISI-1318:** bounded redacted error_preview on failed tool spans ([5874839](https://github.com/henrikrexed/openclaw-observability-plugin/commit/58748393b715abd968fe90a135d650ebdf53bd34))
+
 ## [0.6.1](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.6.0...v0.6.1) (2026-06-03)
 
 
