@@ -111,11 +111,19 @@ Created by the `tool_result_persist` hook. Child of the agent turn span.
 | `openclaw.tool.is_synthetic` | boolean | Whether the tool call is synthetic |
 | `openclaw.tool.result_chars` | int | Total characters in result |
 | `openclaw.tool.result_parts` | int | Number of content parts in result |
+| `openclaw.tool.kind` | string | Tool provider classification (e.g. builtin vs MCP), from `before_tool_call` |
+| `openclaw.tool.input_kind` | string | Shape of the tool input, from `before_tool_call` |
+| `openclaw.tool.derived_paths` | string[] | Filesystem paths the call will touch (file blast-radius). Capped at 50 entries / 512 chars each; each entry redacted before truncation |
 | `openclaw.session.key` | string | Session identifier |
 | `openclaw.agent.id` | string | Agent identifier |
 | `gen_ai.tool.name` | string | Tool name (GenAI semconv) |
 | `gen_ai.operation.name` | string | `execute_tool` |
 | `traceloop.span.kind` | string | `tool` — Traceloop/OpenLLMetry marker read by Dynatrace AI Observability |
+
+> Schema `1.5.0` (ISI-1629) added the tool-span enrichment keys
+> `openclaw.tool.kind`, `openclaw.tool.input_kind`, and
+> `openclaw.tool.derived_paths`, read from the already-subscribed
+> `before_tool_call` hook. Additive only — no `minOpenClawVersion` bump.
 
 **Status:** `OK` on success, `ERROR` if the tool returned an error.
 

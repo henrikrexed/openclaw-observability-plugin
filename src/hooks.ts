@@ -64,6 +64,9 @@ import {
   OPENCLAW_TOOL_APPROVAL_REQUESTED,
   OPENCLAW_TOOL_APPROVAL_RESOLUTION,
   OPENCLAW_TOOL_APPROVAL_DURATION_MS,
+  OC_TOOL_KIND,
+  OC_TOOL_INPUT_KIND,
+  OC_TOOL_DERIVED_PATHS,
   GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
   GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
   GEN_AI_USAGE_INPUT_TOKENS,
@@ -108,6 +111,12 @@ import {
 
 const CODE_NS = "openclaw.otel.hooks";
 const CODE_FILE = "src/hooks.ts";
+
+// Bounds for `openclaw.tool.derived_paths` (ISI-1629). Module-scoped because
+// they are fixed policy constants, not per-call state: cap the number of
+// paths and each path's length so the span attribute stays bounded.
+const DERIVED_PATHS_MAX_ENTRIES = 50;
+const DERIVED_PATH_MAX_CHARS = 512;
 
 /**
  * Emits the stable OTel `code.function.name` + `code.file.path` attributes
@@ -173,6 +182,31 @@ export function registerHooks(
       const preview = redacted.slice(0, 1000);
       setRedactedAttribute(span, "openclaw.tool.input_preview", preview);
     }
+  }
+
+  // ── Tool-span enrichment from before_tool_call (ISI-1629) ─────────
+  // `derivedPaths` is the array of filesystem paths a tool call will touch
+  // (for file blast-radius analysis). Bound BOTH the number of entries and
+  // each entry's length, and route every entry through the same
+  // redact-before-truncate funnel used for the tool input/result previews:
+  // redact the FULL path first, then cap — slicing first could split a
+  // secret below the redaction regex's minimum-match length and leak a
+  // plaintext prefix. Caps are module-scoped (DERIVED_PATHS_MAX_ENTRIES /
+  // DERIVED_PATH_MAX_CHARS).
+  function setToolDerivedPaths(span: any, derivedPaths: unknown): void {
+    if (!Array.isArray(derivedPaths) || derivedPaths.length === 0) return;
+    const paths = derivedPaths
+      .filter((p): p is string => typeof p === "string" && p.length > 0)
+      .slice(0, DERIVED_PATHS_MAX_ENTRIES)
+      .map((p) => {
+        const redacted = redactSensitiveText(p);
+        return redacted.length > DERIVED_PATH_MAX_CHARS
+          ? `${redacted.slice(0, DERIVED_PATH_MAX_CHARS)}…`
+          : redacted;
+      });
+    // Entries are already redacted; set the array directly (setRedactedAttribute
+    // passes arrays through untouched, so per-entry redaction must happen here).
+    if (paths.length > 0) span.setAttribute(OC_TOOL_DERIVED_PATHS, paths);
   }
 
   // ── Granular content capture (ISI-1000) ──────────────────────────
@@ -1220,6 +1254,20 @@ export function registerHooks(
         );
 
         setToolInputPreview(span, toolInput);
+
+        // Tool-span enrichment (ISI-1629) — read the previously-ignored
+        // classification fields the hook already exposes. toolKind /
+        // toolInputKind are controlled enums (low PII risk); derivedPaths is
+        // bounded + redacted via setToolDerivedPaths.
+        const toolKind = event?.toolKind;
+        if (typeof toolKind === "string" && toolKind) {
+          span.setAttribute(OC_TOOL_KIND, toolKind);
+        }
+        const toolInputKind = event?.toolInputKind;
+        if (typeof toolInputKind === "string" && toolInputKind) {
+          span.setAttribute(OC_TOOL_INPUT_KIND, toolInputKind);
+        }
+        setToolDerivedPaths(span, event?.derivedPaths);
 
         // Content capture (ISI-1000) — full tool input, gated by policy.
         captureContentAttribute(

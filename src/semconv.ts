@@ -135,6 +135,19 @@ export const OC_TOOL_RESULT_CHARS = "openclaw.tool.result_chars";
 export const OC_TOOL_RESULT_PARTS = "openclaw.tool.result_parts";
 export const OC_TOOL_INPUT_PREVIEW = "openclaw.tool.input_preview";
 /**
+ * Tool-span enrichment from the already-subscribed `before_tool_call` hook
+ * (ISI-1629). `openclaw.tool.kind` classifies the tool provider (e.g.
+ * builtin vs MCP) for tool-attribution analysis; `openclaw.tool.input_kind`
+ * names the shape of the tool input; `openclaw.tool.derived_paths` is the
+ * bounded, redacted array of filesystem paths the call will touch — enabling
+ * file blast-radius analysis. `derived_paths` is capped in length and each
+ * entry is routed through the redact-before-truncate funnel used for the
+ * tool input / result previews.
+ */
+export const OC_TOOL_KIND = "openclaw.tool.kind";
+export const OC_TOOL_INPUT_KIND = "openclaw.tool.input_kind";
+export const OC_TOOL_DERIVED_PATHS = "openclaw.tool.derived_paths";
+/**
  * Tool-approval attributes live in the plugin-domain namespace because the
  * OTel `gen_ai.*` namespace is reserved for the registry. Renamed from the
  * former `gen_ai.tool.approval.*` keys in schema 1.1.0 (breaking change).
@@ -171,6 +184,13 @@ export const OC_CRON_AGENT_ID = "openclaw.cron.agent_id";
  * Schema version for plugin-domain attributes. Bump when emitted
  * attribute keys or values change in a way that consumers need to know.
  *
+ * `1.5.0` (ISI-1629) — Additive only. Adds tool-span enrichment keys read
+ * from the already-subscribed `before_tool_call` hook:
+ * `openclaw.tool.kind`, `openclaw.tool.input_kind`, and the bounded,
+ * redacted `openclaw.tool.derived_paths` array. No `minOpenClawVersion`
+ * bump — the hook was already subscribed; only previously-ignored fields
+ * are now read. No 1.4.0 key was removed or renamed.
+ *
  * `1.4.0` (ISI-1605) — Additive only. Adds opt-in GenAI content-capture
  * keys aligned to Dynatrace AI Observability (`gen_ai.input.messages`,
  * `gen_ai.output.messages`, `gen_ai.system_instructions`,
@@ -194,7 +214,7 @@ export const OC_CRON_AGENT_ID = "openclaw.cron.agent_id";
  * | `gen_ai.usage.cache_write_tokens`     | `gen_ai.usage.cache_creation.input_tokens`                               |
  * | `gen_ai.usage.total_tokens`           | none — consumers compute `input + output` (per `1.2.0` deprecation note) |
  */
-export const OPENCLAW_SCHEMA_VERSION = "1.4.0";
+export const OPENCLAW_SCHEMA_VERSION = "1.5.0";
 
 // ── Token type values ───────────────────────────────────────────────
 export const TOKEN_TYPE_INPUT = "input";
