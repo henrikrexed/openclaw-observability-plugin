@@ -270,6 +270,19 @@ export function registerHooks(
     return undefined;
   }
 
+  // ── Compaction in-flight state (ISI-1628 / WS3) ──────────────────
+  // Shared between before_compaction (opens the span), after_compaction
+  // (closes it + records deltas), and agent_end (safety-net close if
+  // after_compaction never fires). Declared here so all three handlers
+  // capture the same map. Keyed by sessionKey.
+  interface CompactionInFlight {
+    span: Span;
+    startTime: number;
+    tokensBefore?: number;
+    reason: string;
+  }
+  const compactionInFlight = new Map<string, CompactionInFlight>();
+
   // ═══════════════════════════════════════════════════════════════════
   // TYPED HOOKS — registered via api.on() into registry.typedHooks
   // ═══════════════════════════════════════════════════════════════════
@@ -1986,6 +1999,24 @@ export function registerHooks(
           sessionCtx.activeToolSpans.clear();
         }
 
+        // Safety net: close any compaction span left open because
+        // after_compaction never fired (e.g. the session ended mid-compaction).
+        // Done before ending the agent/root spans so it stays nested, and
+        // prevents a slow map/span leak in long-running plugin processes.
+        const orphanCompaction = compactionInFlight.get(sessionKey);
+        if (orphanCompaction) {
+          try {
+            const compactionMs = Date.now() - orphanCompaction.startTime;
+            orphanCompaction.span.setAttribute(OC_COMPACTION_DURATION_MS, compactionMs);
+            orphanCompaction.span.setStatus({
+              code: SpanStatusCode.ERROR,
+              message: "session ended before after_compaction fired",
+            });
+            orphanCompaction.span.end();
+          } catch { /* ignore */ }
+          compactionInFlight.delete(sessionKey);
+        }
+
         // End the agent turn span
         if (sessionCtx?.agentSpan) {
           const agentSpan = sessionCtx.agentSpan;
@@ -2119,18 +2150,11 @@ export function registerHooks(
   // end-to-end trace. `after_compaction` closes the span, records deltas, and
   // emits the count/tokens_reclaimed metrics.
   //
-  // In-flight state is keyed by sessionKey. The runtime reliably pairs the two
+  // In-flight state is keyed by sessionKey (declared above `agent_end` so its
+  // safety-net can close an orphaned span). The runtime reliably pairs the two
   // hooks; keying by session bounds any leak to at most one span per session
-  // (a re-entrant before_compaction closes the prior span before replacing it).
-  interface CompactionInFlight {
-    span: Span;
-    startTime: number;
-    messagesBefore?: number;
-    tokensBefore?: number;
-    reason: string;
-  }
-  const compactionInFlight = new Map<string, CompactionInFlight>();
-
+  // (a re-entrant before_compaction closes the prior span before replacing it,
+  // and agent_end closes any span left open when after_compaction never fires).
   api.on(
     "before_compaction",
     (event: any, ctx: any) => {
@@ -2148,6 +2172,21 @@ export function registerHooks(
           typeof event?.messageCount === "number" ? event.messageCount : undefined;
         const tokensBefore =
           typeof event?.tokenCount === "number" ? event.tokenCount : undefined;
+
+        // Re-entrant guard: close any prior in-flight compaction span for this
+        // session BEFORE starting the replacement, so the two never overlap
+        // (bounds leaks to one span per session).
+        const prior = compactionInFlight.get(sessionKey);
+        if (prior) {
+          try {
+            prior.span.setStatus({
+              code: SpanStatusCode.OK,
+              message: "superseded by a new before_compaction",
+            });
+            prior.span.end();
+          } catch { /* ignore */ }
+          compactionInFlight.delete(sessionKey);
+        }
 
         // Nest under the active session/agent context so the span lands INSIDE
         // the end-to-end trace rather than starting a fresh root.
@@ -2177,22 +2216,9 @@ export function registerHooks(
           span.setAttribute(OC_COMPACTION_TOKENS_BEFORE, tokensBefore);
         }
 
-        // Re-entrant guard: close any prior in-flight compaction span for this
-        // session before replacing it (bounds leaks to one span per session).
-        const prior = compactionInFlight.get(sessionKey);
-        if (prior) {
-          try {
-            prior.span.setStatus({
-              code: SpanStatusCode.OK,
-              message: "superseded by a new before_compaction",
-            });
-            prior.span.end();
-          } catch { /* ignore */ }
-        }
         compactionInFlight.set(sessionKey, {
           span,
           startTime: Date.now(),
-          messagesBefore,
           tokensBefore,
           reason,
         });

@@ -3602,4 +3602,33 @@ describe("compaction spans + metrics (ISI-1628)", () => {
       "openclaw.compaction.reason": "manual",
     });
   });
+
+  it("agent_end closes a compaction span left open when after_compaction never fires", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    typedHooks.get("before_model_resolve")!({}, { agentId: "a", sessionKey: "s" });
+    typedHooks.get("before_compaction")!(
+      { messageCount: 100, tokenCount: 80_000 },
+      { agentId: "a", sessionKey: "s" },
+    );
+
+    const compactionSpan = spans.find((sp) => sp.spanName === "openclaw.compaction")!;
+    expect(compactionSpan.ended).toBe(false);
+
+    // Session ends mid-compaction — no after_compaction.
+    typedHooks.get("agent_end")!(
+      { sessionKey: "s", agentId: "a", success: true, messages: [] },
+      { sessionKey: "s", agentId: "a" },
+    );
+
+    // The orphan compaction span is closed by the agent_end safety net.
+    expect(compactionSpan.ended).toBe(true);
+    expect(compactionSpan.attrs["openclaw.compaction.duration_ms"]).toEqual(
+      expect.any(Number),
+    );
+    // No after_compaction ran → no metric emitted.
+    expect(telemetry.counters.compactionCount.add).not.toHaveBeenCalled();
+  });
 });
