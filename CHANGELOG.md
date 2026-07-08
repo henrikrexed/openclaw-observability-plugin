@@ -4,6 +4,20 @@ All notable changes to the `@henrikrexed/openclaw-otel-observability` plugin are
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.8.0...v0.9.0) (2026-07-08)
+
+
+### Features
+
+* **diagnostics:** add memory.sample + memory.pressure event support ([c30a2e8](https://github.com/henrikrexed/openclaw-observability-plugin/commit/c30a2e8a70f726a633ebb29fe4cbf9cec13a9629))
+* **diagnostics:** memory.sample + memory.pressure event support ([bf52daf](https://github.com/henrikrexed/openclaw-observability-plugin/commit/bf52daff8486c094bd0b165cb5f253e782b797d1))
+
+
+### Bug Fixes
+
+* **hooks:** move DIAG agent-turn verbose context dump from info to debug level ([30e8fa7](https://github.com/henrikrexed/openclaw-observability-plugin/commit/30e8fa752e8016a3aa78bcee451bc6b3e966e837))
+* **ISI-1653:** re-parent lifecycle spans into the request/session trace ([#67](https://github.com/henrikrexed/openclaw-observability-plugin/issues/67)) ([e4c1245](https://github.com/henrikrexed/openclaw-observability-plugin/commit/e4c12458f6a7ace0c1696cea4e4b7023974cfe64))
+
 ## [Unreleased]
 
 Merged in code review but not yet in a tagged release. Additive — no keys removed or renamed. The plugin-domain attribute schema (`openclaw.schema.version`) advances to `1.5.0`.
