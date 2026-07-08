@@ -331,6 +331,37 @@ export async function registerDiagnosticsListener(
       return;
     }
 
+    // Memory sample events — record memory usage histograms
+    if (evt.type === "diagnostic.memory.sample") {
+      if (evt.memory) {
+        if (typeof evt.memory.rssBytes === "number") histograms.memoryRssBytes.record(evt.memory.rssBytes);
+        if (typeof evt.memory.heapUsedBytes === "number") histograms.memoryHeapUsedBytes.record(evt.memory.heapUsedBytes);
+        if (typeof evt.memory.heapTotalBytes === "number") histograms.memoryHeapTotalBytes.record(evt.memory.heapTotalBytes);
+        if (typeof evt.memory.externalBytes === "number") histograms.memoryExternalBytes.record(evt.memory.externalBytes);
+        if (typeof evt.memory.arrayBuffersBytes === "number") histograms.memoryArrayBuffersBytes.record(evt.memory.arrayBuffersBytes);
+      }
+      logger.debug?.(`[otel] diagnostic.memory.sample: rss=${evt.memory?.rssBytes}, heapUsed=${evt.memory?.heapUsedBytes}`);
+      return;
+    }
+
+    // Memory pressure events
+    if (evt.type === "diagnostic.memory.pressure") {
+      const attrs: Record<string, string> = {};
+      if (evt.reason) attrs["openclaw.memory.reason"] = evt.reason;
+      if (evt.level) attrs["openclaw.memory.level"] = evt.level;
+      counters.memoryPressure.add(1, attrs);
+      // Also record memory snapshot if available
+      if (evt.memory) {
+        if (typeof evt.memory.rssBytes === "number") histograms.memoryRssBytes.record(evt.memory.rssBytes);
+        if (typeof evt.memory.heapUsedBytes === "number") histograms.memoryHeapUsedBytes.record(evt.memory.heapUsedBytes);
+        if (typeof evt.memory.heapTotalBytes === "number") histograms.memoryHeapTotalBytes.record(evt.memory.heapTotalBytes);
+        if (typeof evt.memory.externalBytes === "number") histograms.memoryExternalBytes.record(evt.memory.externalBytes);
+        if (typeof evt.memory.arrayBuffersBytes === "number") histograms.memoryArrayBuffersBytes.record(evt.memory.arrayBuffersBytes);
+      }
+      logger.debug?.(`[otel] diagnostic.memory.pressure: reason=${evt.reason}, level=${evt.level}`);
+      return;
+    }
+
     if (evt.type !== "model.usage") return;
 
     const sessionKey = evt.sessionKey || "unknown";

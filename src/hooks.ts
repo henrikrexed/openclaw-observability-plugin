@@ -501,7 +501,7 @@ export function registerHooks(
           "openclaw.session.channel": channel,
         });
 
-        logger.debug?.(`[otel] Session span started: session=${sessionKey}, agent=${agentId}`);
+        logger.info(`[otel] Session span started: session=${sessionKey}, agent=${agentId}`);
       } catch {
       }
     },
@@ -646,6 +646,9 @@ export function registerHooks(
         );
 
         const agentContext = trace.setSpan(parentContext, agentSpan);
+        // DIAG: log parent context at debug to help trace orphan-span investigations
+        const parentSpanCtx = trace.getSpanContext(parentContext);
+        logger.debug?.(`[otel] DIAG agent turn: parentSpanCtx=${JSON.stringify(parentSpanCtx)}, parentContextHasSpan=${!!trace.getSpan(parentContext)}, agentSpanContext=${JSON.stringify(agentSpan.spanContext())}`);
         logger.info(`[otel] Agent turn span created: spanId=${agentSpan.spanContext().spanId}, isRecording=${agentSpan.isRecording()}`);
 
         // Store agent span context for tool spans
@@ -823,6 +826,9 @@ export function registerHooks(
         const provider = event?.provider || ctx?.provider || "unknown";
 
         const sessionCtx = store.getActiveContext(sessionKey);
+        if (!sessionCtx) {
+          logger.warn(`[otel] DIAG llm_input: NO sessionCtx for sessionKey=${sessionKey}, storeSize=${store.activeContextCount}, eventKeys=${Object.keys(event || {}).join(',')}, ctxKeys=${Object.keys(ctx || {}).join(',')}`);
+        }
         // If llm_input fires without a prior agent span (unusual), fall back
         // to root context so the CLIENT span still attaches to the trace.
         const parentContext =
@@ -982,7 +988,46 @@ export function registerHooks(
         const stream = event?.stream;
         const maxTokens = event?.maxTokens;
 
-        const sessionCtx = store.getActiveContext(sessionKey);
+        let sessionCtx = store.getActiveContext(sessionKey);
+        if (!sessionCtx) {
+          logger.warn(`[otel] model_call_started: NO sessionCtx for sessionKey=${sessionKey}, storeSize=${store.activeContextCount} — creating synthetic root (likely post-compaction retry)`);
+          // Auto-compaction retries skip message_received and before_model_resolve.
+          // Create a synthetic root span + agent turn so child spans get proper parents.
+          const rootSpan = tracer.startSpan("openclaw.request", {
+            kind: SpanKind.SERVER,
+            attributes: {
+              [GEN_AI_CONVERSATION_ID]: sessionKey,
+              "openclaw.session.key": sessionKey,
+              "openclaw.trigger": ctx?.trigger || "compaction_retry",
+              "openclaw.agent.id": agentId,
+              "openclaw.compaction_retry": true,
+            },
+          });
+          const rootContext = trace.setSpan(context.active(), rootSpan);
+          store.setActiveContext(sessionKey, {
+            rootSpan,
+            rootContext,
+            startTime: Date.now(),
+          });
+          // Also create agent turn span
+          const agentSpan = tracer.startSpan(
+            "openclaw.agent.turn",
+            { kind: SpanKind.INTERNAL, attributes: {
+              [GEN_AI_OPERATION_NAME]: OP_INVOKE_AGENT,
+              [GEN_AI_AGENT_ID]: agentId,
+              [GEN_AI_CONVERSATION_ID]: sessionKey,
+              "openclaw.agent.id": agentId,
+              "openclaw.session.key": sessionKey,
+              "openclaw.compaction_retry": true,
+            } },
+            rootContext
+          );
+          const agentContext = trace.setSpan(rootContext, agentSpan);
+          sessionCtx = store.getActiveContext(sessionKey)!;
+          sessionCtx.agentSpan = agentSpan;
+          sessionCtx.agentContext = agentContext;
+          logger.info(`[otel] Created synthetic root+agent span for compaction retry: root=${rootSpan.spanContext().spanId}, agent=${agentSpan.spanContext().spanId}`);
+        }
         const parentContext =
           sessionCtx?.agentContext || sessionCtx?.rootContext || context.active();
 
@@ -1158,6 +1203,9 @@ export function registerHooks(
         const provider = event?.provider || ctx?.provider || "unknown";
 
         const sessionCtx = store.getActiveContext(sessionKey);
+        if (!sessionCtx) {
+          logger.warn(`[otel] DIAG before_dispatch: NO sessionCtx for sessionKey=${sessionKey}, storeSize=${store.activeContextCount}, eventKeys=${Object.keys(event || {}).join(',')}, ctxKeys=${Object.keys(ctx || {}).join(',')}`);
+        }
         const parentContext =
           sessionCtx?.agentContext || sessionCtx?.rootContext || context.active();
 
@@ -1267,6 +1315,9 @@ export function registerHooks(
         const requiresApproval = event?.requiresApproval === true;
 
         const sessionCtx = store.getActiveContext(sessionKey);
+        if (!sessionCtx) {
+          logger.warn(`[otel] DIAG before_tool_call: NO sessionCtx for sessionKey=${sessionKey}, storeSize=${store.activeContextCount}, eventKeys=${Object.keys(event || {}).join(',')}, ctxKeys=${Object.keys(ctx || {}).join(',')}`);
+        }
         const parentContext = sessionCtx?.agentContext || sessionCtx?.rootContext || context.active();
 
         const span = tracer.startSpan(
@@ -1672,6 +1723,9 @@ export function registerHooks(
           typeof messageText === "string" ? messageText.length : 0;
 
         const sessionCtx = store.getActiveContext(sessionKey);
+        if (!sessionCtx) {
+          logger.warn(`[otel] DIAG message_sent: NO sessionCtx for sessionKey=${sessionKey}, storeSize=${store.activeContextCount}, eventKeys=${Object.keys(event || {}).join(',')}, ctxKeys=${Object.keys(ctx || {}).join(',')}`);
+        }
         const parentContext =
           sessionCtx?.rootContext || sessionCtx?.agentContext || context.active();
 
@@ -1718,7 +1772,7 @@ export function registerHooks(
         span.setStatus({ code: SpanStatusCode.OK });
         span.end();
 
-        logger.debug?.(`[otel] Outbound message span recorded: session=${sessionKey}, channel=${channel}, chars=${charCount}`);
+        logger.info(`[otel] Outbound message span recorded: session=${sessionKey}, channel=${channel}, chars=${charCount}`);
       } catch {
         // Never let telemetry errors break the main flow
       }
@@ -3074,6 +3128,7 @@ export function registerHooks(
         });
         span.setStatus({ code: SpanStatusCode.OK });
         span.end();
+        logger.info(`[otel] Gateway startup span recorded`);
       } catch {
         // Silently ignore
       }
@@ -3091,7 +3146,7 @@ export function registerHooks(
   // The handle is returned to the caller so service.stop() can clear it and
   // avoid leaking timers across plugin reload / shutdown.
   const cleanupInterval = setInterval(() => {
-    const maxAge = 5 * 60 * 1000;
+    const maxAge = 30 * 60 * 1000;
     const cleaned = store.cleanupStale(maxAge);
     if (cleaned > 0) {
       logger.debug?.(`[otel] Cleaned up ${cleaned} stale trace contexts`);
