@@ -936,6 +936,76 @@ describe("before_tool_call / after_tool_call hooks (ISI-927)", () => {
     stopHooks();
   });
 
+  it("before_tool_call enriches the span with toolKind / inputKind / derivedPaths (ISI-1629)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const beforeTool = typedHooks.get("before_tool_call")!;
+
+    resolve({}, { agentId: "a1", sessionKey: "s-enrich" });
+    beforeTool(
+      {
+        toolName: "Edit",
+        toolCallId: "tc-enrich",
+        input: { path: "/repo/a.ts" },
+        toolKind: "builtin",
+        toolInputKind: "object",
+        derivedPaths: ["/repo/a.ts", "/repo/b.ts"],
+      },
+      { sessionKey: "s-enrich", agentId: "a1" },
+    );
+
+    const toolSpan = spans.find((s) => s.spanName === "execute_tool Edit");
+    expect(toolSpan).toBeDefined();
+    expect(toolSpan!.attrs["openclaw.tool.kind"]).toBe("builtin");
+    expect(toolSpan!.attrs["openclaw.tool.input_kind"]).toBe("object");
+    expect(toolSpan!.attrs["openclaw.tool.derived_paths"]).toEqual([
+      "/repo/a.ts",
+      "/repo/b.ts",
+    ]);
+
+    stopHooks();
+  });
+
+  it("before_tool_call redacts + caps derivedPaths and omits missing enrichment fields", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const beforeTool = typedHooks.get("before_tool_call")!;
+
+    resolve({}, { agentId: "a1", sessionKey: "s-redact" });
+    // 60 paths, one carrying an inline API key. Non-string entries are dropped.
+    const many = Array.from({ length: 60 }, (_, i) => `/repo/file${i}.ts`);
+    many.push(42 as any);
+    many[0] = "/repo/sk-ant-abcdefghijklmnopqrstuvwxyz012345.ts";
+    beforeTool(
+      {
+        toolName: "Bash",
+        toolCallId: "tc-redact",
+        derivedPaths: many,
+      },
+      { sessionKey: "s-redact", agentId: "a1" },
+    );
+
+    const toolSpan = spans.find((s) => s.spanName === "execute_tool Bash");
+    expect(toolSpan).toBeDefined();
+    const paths = toolSpan!.attrs["openclaw.tool.derived_paths"] as string[];
+    // Capped to 50 entries.
+    expect(paths.length).toBe(50);
+    // Secret redacted, not shipped as plaintext.
+    expect(paths[0]).toContain("[REDACTED_API_KEY]");
+    expect(paths.join("\n")).not.toContain("sk-ant-abcdefghijklmnopqrstuvwxyz012345");
+    // No toolKind / inputKind supplied → attributes omitted entirely.
+    expect(toolSpan!.attrs["openclaw.tool.kind"]).toBeUndefined();
+    expect(toolSpan!.attrs["openclaw.tool.input_kind"]).toBeUndefined();
+
+    stopHooks();
+  });
+
   it("after_tool_call closes the span with result metadata and duration", () => {
     const { api, typedHooks } = createStubApi();
     const { telemetry, spans } = createTelemetry();
