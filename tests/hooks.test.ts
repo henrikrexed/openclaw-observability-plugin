@@ -1006,6 +1006,32 @@ describe("before_tool_call / after_tool_call hooks (ISI-927)", () => {
     stopHooks();
   });
 
+  it("before_tool_call truncates a derivedPaths entry longer than 512 chars with an ellipsis", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const beforeTool = typedHooks.get("before_tool_call")!;
+
+    resolve({}, { agentId: "a1", sessionKey: "s-trunc" });
+    const longPath = "/repo/" + "a".repeat(600); // 606 chars, > 512 cap
+    beforeTool(
+      { toolName: "Read", toolCallId: "tc-trunc", derivedPaths: [longPath] },
+      { sessionKey: "s-trunc", agentId: "a1" },
+    );
+
+    const toolSpan = spans.find((s) => s.spanName === "execute_tool Read");
+    expect(toolSpan).toBeDefined();
+    const paths = toolSpan!.attrs["openclaw.tool.derived_paths"] as string[];
+    // Capped to 512 chars + a single ellipsis suffix.
+    expect(paths[0].length).toBe(513);
+    expect(paths[0].endsWith("…")).toBe(true);
+    expect(paths[0].slice(0, 512)).toBe(longPath.slice(0, 512));
+
+    stopHooks();
+  });
+
   it("after_tool_call closes the span with result metadata and duration", () => {
     const { api, typedHooks } = createStubApi();
     const { telemetry, spans } = createTelemetry();

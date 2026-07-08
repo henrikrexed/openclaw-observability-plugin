@@ -112,6 +112,12 @@ import {
 const CODE_NS = "openclaw.otel.hooks";
 const CODE_FILE = "src/hooks.ts";
 
+// Bounds for `openclaw.tool.derived_paths` (ISI-1629). Module-scoped because
+// they are fixed policy constants, not per-call state: cap the number of
+// paths and each path's length so the span attribute stays bounded.
+const DERIVED_PATHS_MAX_ENTRIES = 50;
+const DERIVED_PATH_MAX_CHARS = 512;
+
 /**
  * Emits the stable OTel `code.function.name` + `code.file.path` attributes
  * for a hook span. Spread the result into the span `attributes` block.
@@ -185,10 +191,8 @@ export function registerHooks(
   // redact-before-truncate funnel used for the tool input/result previews:
   // redact the FULL path first, then cap — slicing first could split a
   // secret below the redaction regex's minimum-match length and leak a
-  // plaintext prefix.
-  const DERIVED_PATHS_MAX_ENTRIES = 50;
-  const DERIVED_PATH_MAX_CHARS = 512;
-
+  // plaintext prefix. Caps are module-scoped (DERIVED_PATHS_MAX_ENTRIES /
+  // DERIVED_PATH_MAX_CHARS).
   function setToolDerivedPaths(span: any, derivedPaths: unknown): void {
     if (!Array.isArray(derivedPaths) || derivedPaths.length === 0) return;
     const paths = derivedPaths
