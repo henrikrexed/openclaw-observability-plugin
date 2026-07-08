@@ -38,6 +38,41 @@ export const GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS =
 /** Used on `gen_ai.client.token.usage` histogram to distinguish input / output. */
 export const GEN_AI_TOKEN_TYPE = "gen_ai.token.type";
 
+// ── GenAI content-capture keys (ISI-1605) ───────────────────────────
+// These carry prompt / completion BODIES — PII by definition. They are
+// emitted ONLY when the matching `captureContent` policy flag is enabled
+// (default all-off) and ALWAYS routed through the redact-before-truncate
+// funnel (`captureContentAttribute` → `setRedactedAttribute`). Dynatrace AI
+// Observability reads these keys to render prompt / response content.
+/** Input messages sent to the model (JSON-encoded array or prompt text). */
+export const GEN_AI_INPUT_MESSAGES = "gen_ai.input.messages";
+/** Output messages returned by the model. */
+export const GEN_AI_OUTPUT_MESSAGES = "gen_ai.output.messages";
+/**
+ * System-instruction PROMPT CONTENT (Dynatrace AI Observability key).
+ *
+ * Intentionally distinct from the OTel provider identifier. The provider
+ * key `gen_ai.provider.name` (formerly `gen_ai.system`, removed in schema
+ * 1.3.0 / ISI-1004) names *which* provider served the call; this key
+ * carries the system-prompt *text* the agent was configured with. Both
+ * semantics are kept separate on purpose — never collapse them.
+ */
+export const GEN_AI_SYSTEM_INSTRUCTIONS = "gen_ai.system_instructions";
+/** Azure/OpenAI prompt content-filter result payload (JSON string). */
+export const GEN_AI_PROMPT_FILTER_RESULTS = "gen_ai.prompt.prompt_filter_results";
+/** Azure/OpenAI completion content-filter result payload (JSON string). */
+export const GEN_AI_COMPLETION_CONTENT_FILTER_RESULTS =
+  "gen_ai.completion.content_filter_results";
+
+// ── Traceloop / OpenLLMetry vendor compatibility (ISI-1605) ──────────
+// `traceloop.span.kind` is a Traceloop/OpenLLMetry vendor attribute (NOT
+// OTel gen_ai semconv) that Dynatrace AI Observability uses to classify a
+// span as an agent task vs. a tool invocation. Kept outside the gen_ai.*
+// namespace because that namespace is reserved for the OTel registry.
+export const TRACELOOP_SPAN_KIND = "traceloop.span.kind";
+export const TRACELOOP_SPAN_KIND_TASK = "task";
+export const TRACELOOP_SPAN_KIND_TOOL = "tool";
+
 // ── GenAI operation name values ─────────────────────────────────────
 export const OP_INVOKE_AGENT = "invoke_agent";
 export const OP_EXECUTE_TOOL = "execute_tool";
@@ -136,6 +171,16 @@ export const OC_CRON_AGENT_ID = "openclaw.cron.agent_id";
  * Schema version for plugin-domain attributes. Bump when emitted
  * attribute keys or values change in a way that consumers need to know.
  *
+ * `1.4.0` (ISI-1605) — Additive only. Adds opt-in GenAI content-capture
+ * keys aligned to Dynatrace AI Observability (`gen_ai.input.messages`,
+ * `gen_ai.output.messages`, `gen_ai.system_instructions`,
+ * `gen_ai.prompt.prompt_filter_results`,
+ * `gen_ai.completion.content_filter_results`) plus the vendor marker
+ * `traceloop.span.kind` (`task` on agent-turn spans, `tool` on tool
+ * spans). The content keys emit only when the matching `captureContent`
+ * flag is enabled (default off) and are routed through the
+ * redact-before-truncate funnel. No 1.3.0 key was removed or renamed.
+ *
  * `1.3.0` — Closes the OTel GenAI / code semconv 2026-04 dual-emit
  * window opened in `1.2.0`. The following legacy keys are no longer
  * emitted (consumers must use the stable replacements shipped in
@@ -149,7 +194,7 @@ export const OC_CRON_AGENT_ID = "openclaw.cron.agent_id";
  * | `gen_ai.usage.cache_write_tokens`     | `gen_ai.usage.cache_creation.input_tokens`                               |
  * | `gen_ai.usage.total_tokens`           | none — consumers compute `input + output` (per `1.2.0` deprecation note) |
  */
-export const OPENCLAW_SCHEMA_VERSION = "1.3.0";
+export const OPENCLAW_SCHEMA_VERSION = "1.4.0";
 
 // ── Token type values ───────────────────────────────────────────────
 export const TOKEN_TYPE_INPUT = "input";

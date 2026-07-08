@@ -67,6 +67,16 @@ See [CHANGELOG](../../CHANGELOG.md) and ISI-730 for the migration details.
 | `gen_ai.usage.input_tokens` | int | Total input tokens (including cache read/write) |
 | `gen_ai.usage.output_tokens` | int | Total output tokens |
 | `gen_ai.response.model` | string | Actual model used (from last assistant message) |
+| `traceloop.span.kind` | string | `task` — Traceloop/OpenLLMetry marker read by Dynatrace AI Observability |
+| `gen_ai.input.messages` | string | **Opt-in.** Input messages (JSON array, or flat prompt when no array). Gated by `captureContent.inputMessages`; redacted before truncation |
+| `gen_ai.system_instructions` | string | **Opt-in.** System-prompt text. Gated by `captureContent.systemPrompt`; redacted before truncation. Distinct from `gen_ai.provider.name` |
+
+> Schema `1.4.0` (ISI-1605) added the opt-in GenAI content keys
+> (`gen_ai.input.messages`, `gen_ai.system_instructions`, and on other
+> spans `gen_ai.output.messages`, `gen_ai.prompt.prompt_filter_results`,
+> `gen_ai.completion.content_filter_results`) plus the `traceloop.span.kind`
+> marker. Content keys emit only when the matching `captureContent` flag is
+> on (default off) and always pass through the redact-before-truncate funnel.
 
 > Schema `1.3.0` (ISI-1004) removed `gen_ai.usage.total_tokens` — compute
 > it as `gen_ai.usage.input_tokens + gen_ai.usage.output_tokens`.
@@ -103,8 +113,24 @@ Created by the `tool_result_persist` hook. Child of the agent turn span.
 | `openclaw.tool.result_parts` | int | Number of content parts in result |
 | `openclaw.session.key` | string | Session identifier |
 | `openclaw.agent.id` | string | Agent identifier |
+| `gen_ai.tool.name` | string | Tool name (GenAI semconv) |
+| `gen_ai.operation.name` | string | `execute_tool` |
+| `traceloop.span.kind` | string | `tool` — Traceloop/OpenLLMetry marker read by Dynatrace AI Observability |
 
 **Status:** `OK` on success, `ERROR` if the tool returned an error.
+
+### Outbound message span (`openclaw.message.sent`)
+
+When `captureContent.outputMessages` is enabled the outbound reply is also
+emitted as `gen_ai.output.messages` (alongside the legacy
+`openclaw.content.output_message`), redacted before truncation.
+
+### Content-filter results (`openclaw.llm.call` / `chat <model>`)
+
+Azure/OpenAI content-filter payloads returned on the model response are
+emitted — when gated on — as `gen_ai.prompt.prompt_filter_results` (behind
+`captureContent.inputMessages`) and `gen_ai.completion.content_filter_results`
+(behind `captureContent.outputMessages`), JSON-encoded and redacted.
 
 ## Command Spans
 

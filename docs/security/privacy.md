@@ -38,7 +38,23 @@ Each policy flag also gates one or more `openclaw.content.*` attributes on the p
 | `toolOutputs` | `openclaw.content.tool_output` on `execute_tool <tool>` | Tool-call result text (text parts only) |
 | `systemPrompt` | `openclaw.content.system_prompt` on `openclaw.agent.turn` | System prompt text |
 
-All `openclaw.content.*` attributes are truncated to **8192 UTF-16 code units** per value (a JavaScript string `.length` measurement, not bytes — CJK and emoji content can occupy 2–4 bytes per code point on the wire). Larger payloads get an inline `…(truncated, N more chars)` marker, and the cut point is adjusted by one code unit when it would otherwise split a surrogate pair so the prefix stays valid UTF-16.
+**GenAI mirrors (ISI-1605, schema 1.4.0).** The same flags also gate a
+parallel set of `gen_ai.*` / `traceloop.*` keys aligned to Dynatrace AI
+Observability. These are emitted **in addition to** the `openclaw.content.*`
+attributes above, share the exact same policy gate, and pass through the same
+redact-before-truncate funnel:
+
+| Flag | GenAI/Traceloop attribute(s) | Span |
+|------|------------------------------|------|
+| `inputMessages` | `gen_ai.input.messages`, `gen_ai.prompt.prompt_filter_results` | `openclaw.agent.turn`; `chat <model>` / `openclaw.llm.call` |
+| `outputMessages` | `gen_ai.output.messages`, `gen_ai.completion.content_filter_results` | `openclaw.message.sent`; `chat <model>` / `openclaw.llm.call` |
+| `systemPrompt` | `gen_ai.system_instructions` | `openclaw.agent.turn` |
+| _(always, not gated)_ | `traceloop.span.kind` = `task` / `tool` | `openclaw.agent.turn` / `execute_tool <tool>` |
+
+`traceloop.span.kind` is a non-content metadata marker (agent task vs. tool
+invocation) and is emitted unconditionally, regardless of `captureContent`.
+
+All content attributes (both `openclaw.content.*` and the `gen_ai.*` mirrors) are truncated to **8192 UTF-16 code units** per value (a JavaScript string `.length` measurement, not bytes — CJK and emoji content can occupy 2–4 bytes per code point on the wire). Larger payloads get an inline `…(truncated, N more chars)` marker, and the cut point is adjusted by one code unit when it would otherwise split a surrogate pair so the prefix stays valid UTF-16.
 
 ## What `captureContent` does **not** affect
 
@@ -138,7 +154,9 @@ Whenever a flag is `true`, the following can land in span storage:
 - `toolInputs`: tool-call arguments — file paths, command lines, query strings, API request bodies. Note that even with `toolInputs: false`, the smaller `openclaw.tool.input_preview` attribute is still emitted.
 - `toolOutputs`: tool-call results fed back to the model — file contents from `tool.Read`, shell command output, database query results.
 
-The plugin does **not** scrub Traceloop or `openclaw.content.*` span attributes before export. If you need redaction, apply it at the OTel Collector (`transform` / `attributes` processors) or at the backend.
+The plugin's **own** hook-surface content attributes — every `openclaw.content.*` value **and** the `gen_ai.*` mirrors (`gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`, and the `*_filter_results` keys) — are passed through the plugin's secret-redaction funnel (`redactSensitiveText` → `setRedactedAttribute`) **before** truncation, so known credential shapes (API keys, bearer/basic tokens, JWTs, AWS keys, emails) are scrubbed. Redaction is best-effort pattern matching, not a guarantee against all PII.
+
+The plugin does **not** scrub **Traceloop**-emitted `gen_ai.prompt.*.content` / `gen_ai.completion.*.content` attributes (produced by the preload instrumentations, outside the plugin's control). If you need redaction on those, apply it at the OTel Collector (`transform` / `attributes` processors) or at the backend.
 
 ## Complementary detections
 
