@@ -152,6 +152,34 @@ How often sessions are reset via `/new` or `/reset`. Broken down by channel sour
 
 A gauge-like metric showing the number of active sessions at any point in time.
 
+## Compaction Metrics
+
+### `openclaw.compaction.count`
+
+| | |
+|---|---|
+| **Type** | Counter |
+| **Unit** | events |
+| **Attributes** | `openclaw.compaction.reason` |
+| **Description** | Total context-compaction events |
+
+How often the runtime compacts session context. Auto-compaction reports
+`reason="auto"`. Pairs with the `openclaw.compaction` span for per-event detail.
+
+---
+
+### `openclaw.compaction.tokens_reclaimed`
+
+| | |
+|---|---|
+| **Type** | Histogram |
+| **Unit** | `{token}` |
+| **Attributes** | `openclaw.compaction.reason` |
+| **Description** | Tokens reclaimed by a context-compaction event (`tokens_before − tokens_after`, clamped at 0) |
+
+Quantifies how much context each compaction frees. Recorded only when the
+runtime reports both pre- and post-compaction token counts.
+
 ## Message Metrics
 
 ### `openclaw.messages.received`

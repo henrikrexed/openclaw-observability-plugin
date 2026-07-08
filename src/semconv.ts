@@ -174,19 +174,47 @@ export const OC_CRON_DURATION_MS = "openclaw.cron.duration_ms";
 export const OC_CRON_SUCCESS = "openclaw.cron.success";
 export const OC_CRON_AGENT_ID = "openclaw.cron.agent_id";
 
+// ── Compaction attribute keys (ISI-1628 / WS3) ──────────────────────
+// Compaction is a major context/token event surfaced via the
+// `before_compaction` / `after_compaction` hooks. These keys land on the
+// `openclaw.compaction` span nested inside the end-to-end session trace.
+/** Why compaction ran. Auto-compaction today has no payload field, so the
+ *  emit site defaults to `"auto"` (read defensively for future runtimes). */
+export const OC_COMPACTION_REASON = "openclaw.compaction.reason";
+/** Session message count before compaction. */
+export const OC_COMPACTION_MESSAGES_BEFORE = "openclaw.compaction.messages_before";
+/** Session message count after compaction. */
+export const OC_COMPACTION_MESSAGES_AFTER = "openclaw.compaction.messages_after";
+/** Token count before compaction (when the runtime reports it). */
+export const OC_COMPACTION_TOKENS_BEFORE = "openclaw.compaction.tokens_before";
+/** Token count after compaction (when the runtime reports it). */
+export const OC_COMPACTION_TOKENS_AFTER = "openclaw.compaction.tokens_after";
+/** Tokens reclaimed = `tokens_before − tokens_after` (clamped at 0). */
+export const OC_COMPACTION_TOKENS_RECLAIMED = "openclaw.compaction.tokens_reclaimed";
+/** Wall-clock duration of the compaction span in milliseconds. */
+export const OC_COMPACTION_DURATION_MS = "openclaw.compaction.duration_ms";
+
 /**
  * Schema version for plugin-domain attributes. Bump when emitted
  * attribute keys or values change in a way that consumers need to know.
  *
- * `1.5.0` (ISI-1627) — Additive only. Adds `openclaw.subagent.run_id` and
- * sets the stable `gen_ai.request.model` + `gen_ai.provider.name` keys on the
- * subagent spawn span, sourced from the new `subagent_spawned` hook's
- * `runId` / `resolvedModel` / `resolvedProvider` fields (model/provider
- * previously resolved to "unknown" on the deprecated `subagent_spawning`
- * hook). No `minOpenClawVersion` bump — the new fields are read defensively
- * and absent-field access is harmless. No 1.4.0 key was removed or renamed.
- * (Sibling ISI-1628 / ISI-1629 also target `1.5.0`; whichever PR merges first
- * introduces the bump and the others reconcile this note.)
+ * `1.5.0` — Additive only, contributed by sibling issues ISI-1627 and
+ * ISI-1628 (ISI-1627 introduced the bump on merge; ISI-1628 reconciled this
+ * note on rebase). No `1.4.0` key was removed or renamed; no
+ * `minOpenClawVersion` bump.
+ *
+ *   - ISI-1627: adds `openclaw.subagent.run_id` and sets the stable
+ *     `gen_ai.request.model` + `gen_ai.provider.name` keys on the subagent
+ *     spawn span, sourced from the new `subagent_spawned` hook's
+ *     `runId` / `resolvedModel` / `resolvedProvider` fields (model/provider
+ *     previously resolved to "unknown" on the deprecated `subagent_spawning`
+ *     hook). New fields are read defensively; absent-field access is harmless.
+ *   - ISI-1628: adds the `openclaw.compaction.*` keys emitted on the new
+ *     `openclaw.compaction` span (nested inside the session trace): `reason`,
+ *     `messages_before` / `messages_after`, `tokens_before` / `tokens_after`,
+ *     `tokens_reclaimed`, `duration_ms`. Adds two metrics:
+ *     `openclaw.compaction.count` (counter, attr `reason`) and
+ *     `openclaw.compaction.tokens_reclaimed` (histogram).
  *
  * `1.4.0` (ISI-1605) — Additive only. Adds opt-in GenAI content-capture
  * keys aligned to Dynatrace AI Observability (`gen_ai.input.messages`,
