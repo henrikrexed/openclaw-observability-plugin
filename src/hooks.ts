@@ -646,9 +646,10 @@ export function registerHooks(
         );
 
         const agentContext = trace.setSpan(parentContext, agentSpan);
-        // DIAG: verify SDK sees the parent correctly
+        // DIAG: log parent context at debug to help trace orphan-span investigations
         const parentSpanCtx = trace.getSpanContext(parentContext);
-        logger.info(`[otel] DIAG agent turn: parentSpanCtx=${JSON.stringify(parentSpanCtx)}, parentContextHasSpan=${!!trace.getSpan(parentContext)}, agentSpanContext=${JSON.stringify(agentSpan.spanContext())}`);
+        logger.debug?.(`[otel] DIAG agent turn: parentSpanCtx=${JSON.stringify(parentSpanCtx)}, parentContextHasSpan=${!!trace.getSpan(parentContext)}, agentSpanContext=${JSON.stringify(agentSpan.spanContext())}`);
+        logger.info(`[otel] Agent turn span created: spanId=${agentSpan.spanContext().spanId}, isRecording=${agentSpan.isRecording()}`);
 
         // Store agent span context for tool spans
         if (sessionCtx) {
