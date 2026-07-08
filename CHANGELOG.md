@@ -4,6 +4,23 @@ All notable changes to the `@henrikrexed/openclaw-otel-observability` plugin are
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.7.0...v0.8.0) (2026-07-08)
+
+
+### Features
+
+* **ISI-1605:** gen_ai content semconv keys for Dynatrace AI Observability ([c41734f](https://github.com/henrikrexed/openclaw-observability-plugin/commit/c41734f328e2ca22afd775731497528962bd6f09))
+* **ISI-1605:** gen_ai content semconv keys for Dynatrace AI Observability ([e5a6ecf](https://github.com/henrikrexed/openclaw-observability-plugin/commit/e5a6ecf8903d7f1a92761201a9f37443d882b2bb))
+* **ISI-1627:** subagent_spawned migration + end-to-end trace propagation ([b7ebd08](https://github.com/henrikrexed/openclaw-observability-plugin/commit/b7ebd08044410104c3e2af085ef0c6b15f128cba))
+* **ISI-1627:** subagent_spawned migration + end-to-end trace propagation ([0bda813](https://github.com/henrikrexed/openclaw-observability-plugin/commit/0bda813d3f3c162b03b32657835bdcbd1ce6b216))
+* **ISI-1628:** compaction spans + metrics (before/after_compaction) ([c6343f6](https://github.com/henrikrexed/openclaw-observability-plugin/commit/c6343f6c0bbbfa1664c73513fe561527dd636ee5))
+* **ISI-1628:** compaction spans + metrics (before/after_compaction) ([6684ad4](https://github.com/henrikrexed/openclaw-observability-plugin/commit/6684ad4c4cfe79f10caedae644abfa3b2090cfba))
+
+
+### Bug Fixes
+
+* **ISI-1627:** dedupe subagent spawn span when parent has no session context ([953f1ad](https://github.com/henrikrexed/openclaw-observability-plugin/commit/953f1ad5bf66ca7245da8ab984c95ab90a5f2815))
+
 ## [0.7.0](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.6.1...v0.7.0) (2026-06-17)
 
 
