@@ -204,6 +204,8 @@ export interface OtelCounters {
   webhooksErrors: Counter;
   /** Compaction events (attr: reason) — ISI-1628 */
   compactionCount: Counter;
+  /** Memory pressure events */
+  memoryPressure: Counter;
 }
 
 export interface OtelHistograms {
@@ -247,6 +249,16 @@ export interface OtelHistograms {
   webhookPayloadSize: Histogram;
   /** Tokens reclaimed by a compaction event — ISI-1628 */
   compactionTokensReclaimed: Histogram;
+  /** Memory: resident set size in bytes */
+  memoryRssBytes: Histogram;
+  /** Memory: heap used in bytes */
+  memoryHeapUsedBytes: Histogram;
+  /** Memory: heap total in bytes */
+  memoryHeapTotalBytes: Histogram;
+  /** Memory: external in bytes */
+  memoryExternalBytes: Histogram;
+  /** Memory: array buffers in bytes */
+  memoryArrayBuffersBytes: Histogram;
 }
 
 export interface OtelGauges {
@@ -584,6 +596,10 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       description: "Total context-compaction events",
       unit: "events",
     }),
+    memoryPressure: meter.createCounter("openclaw.memory.pressure", {
+      description: "Diagnostic memory pressure events",
+      unit: "1",
+    }),
   };
 
   const toolDuration = meter.createHistogram("openclaw.tool.duration", {
@@ -671,6 +687,27 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     compactionTokensReclaimed: meter.createHistogram("openclaw.compaction.tokens_reclaimed", {
       description: "Tokens reclaimed by a context-compaction event",
       unit: "{token}",
+    }),
+    // Memory histograms (diagnostic.memory.sample events)
+    memoryRssBytes: meter.createHistogram("openclaw.memory.rss_bytes", {
+      description: "Resident set size reported by diagnostic memory samples",
+      unit: "By",
+    }),
+    memoryHeapUsedBytes: meter.createHistogram("openclaw.memory.heap_used_bytes", {
+      description: "Heap used bytes reported by diagnostic memory samples",
+      unit: "By",
+    }),
+    memoryHeapTotalBytes: meter.createHistogram("openclaw.memory.heap_total_bytes", {
+      description: "Heap total bytes reported by diagnostic memory samples",
+      unit: "By",
+    }),
+    memoryExternalBytes: meter.createHistogram("openclaw.memory.external_bytes", {
+      description: "External memory bytes reported by diagnostic memory samples",
+      unit: "By",
+    }),
+    memoryArrayBuffersBytes: meter.createHistogram("openclaw.memory.array_buffers_bytes", {
+      description: "ArrayBuffer bytes reported by diagnostic memory samples",
+      unit: "By",
     }),
   };
 
