@@ -156,6 +156,13 @@ export const OC_SUBAGENT_CHILD_SESSION = "openclaw.subagent.child_session_key";
 export const OC_SUBAGENT_CHILD_AGENT_ID = "openclaw.subagent.child_agent_id";
 export const OC_SUBAGENT_CHILD_AGENT_NAME = "openclaw.subagent.child_agent_name";
 export const OC_SUBAGENT_SPAWN_REASON = "openclaw.subagent.spawn_reason";
+/**
+ * OpenClaw run id of the spawned subagent (ISI-1627 / WS1). Sourced from the
+ * `subagent_spawned` hook's `runId`; absent on the deprecated
+ * `subagent_spawning` hook. Correlates the subagent span with the runtime's
+ * run-scoped logs/metrics.
+ */
+export const OC_SUBAGENT_RUN_ID = "openclaw.subagent.run_id";
 export const OC_SUBAGENT_DELIVERY_TYPE = "openclaw.subagent.delivery_type";
 export const OC_SUBAGENT_SUCCESS = "openclaw.subagent.success";
 export const OC_SUBAGENT_DURATION_MS = "openclaw.subagent.duration_ms";
@@ -170,6 +177,16 @@ export const OC_CRON_AGENT_ID = "openclaw.cron.agent_id";
 /**
  * Schema version for plugin-domain attributes. Bump when emitted
  * attribute keys or values change in a way that consumers need to know.
+ *
+ * `1.5.0` (ISI-1627) — Additive only. Adds `openclaw.subagent.run_id` and
+ * sets the stable `gen_ai.request.model` + `gen_ai.provider.name` keys on the
+ * subagent spawn span, sourced from the new `subagent_spawned` hook's
+ * `runId` / `resolvedModel` / `resolvedProvider` fields (model/provider
+ * previously resolved to "unknown" on the deprecated `subagent_spawning`
+ * hook). No `minOpenClawVersion` bump — the new fields are read defensively
+ * and absent-field access is harmless. No 1.4.0 key was removed or renamed.
+ * (Sibling ISI-1628 / ISI-1629 also target `1.5.0`; whichever PR merges first
+ * introduces the bump and the others reconcile this note.)
  *
  * `1.4.0` (ISI-1605) — Additive only. Adds opt-in GenAI content-capture
  * keys aligned to Dynatrace AI Observability (`gen_ai.input.messages`,
@@ -194,7 +211,7 @@ export const OC_CRON_AGENT_ID = "openclaw.cron.agent_id";
  * | `gen_ai.usage.cache_write_tokens`     | `gen_ai.usage.cache_creation.input_tokens`                               |
  * | `gen_ai.usage.total_tokens`           | none — consumers compute `input + output` (per `1.2.0` deprecation note) |
  */
-export const OPENCLAW_SCHEMA_VERSION = "1.4.0";
+export const OPENCLAW_SCHEMA_VERSION = "1.5.0";
 
 // ── Token type values ───────────────────────────────────────────────
 export const TOKEN_TYPE_INPUT = "input";

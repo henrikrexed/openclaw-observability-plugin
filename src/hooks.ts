@@ -45,7 +45,7 @@ import {
   type SecurityCounters,
 } from "./security.js";
 import { TraceContextStore } from "./trace-context-store.js";
-import { injectTraceContext, extractTraceContext } from "./propagation.js";
+import { extractTraceContext } from "./propagation.js";
 import {
   GEN_AI_AGENT_ID,
   GEN_AI_AGENT_NAME,
@@ -93,6 +93,7 @@ import {
   OC_SUBAGENT_CHILD_AGENT_ID,
   OC_SUBAGENT_CHILD_AGENT_NAME,
   OC_SUBAGENT_SPAWN_REASON,
+  OC_SUBAGENT_RUN_ID,
   OC_SUBAGENT_DELIVERY_TYPE,
   OC_SUBAGENT_SUCCESS,
   OC_SUBAGENT_DURATION_MS,
@@ -266,6 +267,28 @@ export function registerHooks(
   // TYPED HOOKS — registered via api.on() into registry.typedHooks
   // ═══════════════════════════════════════════════════════════════════
 
+  /**
+   * ISI-1627 / WS2 — resolve the live parent trace context for a session that
+   * was spawned as a subagent in THIS gateway process. Returns `undefined`
+   * for ordinary (non-subagent) sessions.
+   *
+   * Prefers nesting the child request directly under the subagent spawn span
+   * (`__subagent_<childSessionKey>` in the parent's `activeToolSpans`) so the
+   * trace reads parent-turn → spawn → child-request → child-tools. Falls back
+   * to the parent's turn/request context when the spawn span is unavailable.
+   */
+  function resolveSubagentParentContext(childSessionKey: string): Context | undefined {
+    const parentSessionKey = store.getParentSession(childSessionKey);
+    if (!parentSessionKey) return undefined;
+    const base = store.resolveParentContext(childSessionKey)
+      || store.getActiveContext(parentSessionKey)?.rootContext;
+    if (!base) return undefined;
+    const spawn = store
+      .getActiveContext(parentSessionKey)
+      ?.activeToolSpans?.get(`__subagent_${childSessionKey}`);
+    return spawn ? trace.setSpan(base, spawn.span) : base;
+  }
+
   // ── message_received ─────────────────────────────────────────────
   // Creates the ROOT span for the entire request lifecycle.
   // All subsequent spans (agent, tools) become children of this span.
@@ -285,21 +308,57 @@ export function registerHooks(
         const from = event?.from || event?.senderId || "unknown";
         const messageText = event?.text || event?.message || "";
 
-        // Create root span for this request
-        const rootSpan = tracer.startSpan("openclaw.request", {
-          kind: SpanKind.SERVER,
-          attributes: {
-            // openclaw legacy
-            "openclaw.message.channel": channel,
-            "openclaw.session.key": sessionKey,
-            "openclaw.message.direction": "inbound",
-            "openclaw.message.from": from,
-            // GenAI conversation correlation
-            [GEN_AI_CONVERSATION_ID]: sessionKey,
-            // code.*
-            ...codeAttrs("message_received"),
+        // ISI-1627 / WS2 — resolve the parent trace context BEFORE creating
+        // the root span so a spawned subagent's request nests into its
+        // spawner's trace (ONE end-to-end trace.id) rather than starting a
+        // fresh trace root. Two sources, strongest first:
+        //   1. Incoming W3C `traceparent` on the message metadata — external
+        //      / cross-process ingress. Honoured when present.
+        //   2. In-process subagent link — when THIS gateway spawned the
+        //      child, the spawn hook recorded a parent↔child link and the
+        //      parent's spawn-span context is live in this same process. This
+        //      is the reliable path for OpenClaw subagents, which carry no
+        //      `traceparent` across the spawn boundary (the spawn hooks fire a
+        //      fire-and-forget event with no mutable session carrier).
+        const incomingTraceparent = event?.traceContext?.traceparent || event?.metadata?.traceparent;
+        const incomingTracestate = event?.traceContext?.tracestate || event?.metadata?.tracestate;
+
+        let parentContext = context.active();
+        let extractedParent: Context | undefined;
+        if (incomingTraceparent) {
+          const extracted = extractTraceContext({
+            traceparent: incomingTraceparent,
+            tracestate: incomingTracestate,
+          });
+          if (extracted && trace.getSpanContext(extracted)) {
+            extractedParent = extracted;
+            parentContext = extracted;
+          }
+        }
+        if (!extractedParent) {
+          const subagentParent = resolveSubagentParentContext(sessionKey);
+          if (subagentParent) parentContext = subagentParent;
+        }
+
+        // Create root span for this request (parented into the resolved trace).
+        const rootSpan = tracer.startSpan(
+          "openclaw.request",
+          {
+            kind: SpanKind.SERVER,
+            attributes: {
+              // openclaw legacy
+              "openclaw.message.channel": channel,
+              "openclaw.session.key": sessionKey,
+              "openclaw.message.direction": "inbound",
+              "openclaw.message.from": from,
+              // GenAI conversation correlation
+              [GEN_AI_CONVERSATION_ID]: sessionKey,
+              // code.*
+              ...codeAttrs("message_received"),
+            },
           },
-        });
+          parentContext,
+        );
 
         // ═══ SECURITY DETECTION 2: Prompt Injection ═══════════════
         if (messageText && typeof messageText === "string" && messageText.length > 0) {
@@ -326,24 +385,17 @@ export function registerHooks(
           messageText,
         );
 
-        // ISI-1021: Extract W3C trace context from incoming message metadata
-        // (for subagent sessions that were spawned with traceparent injected).
-        const incomingTraceparent = event?.traceContext?.traceparent || event?.metadata?.traceparent;
-        const incomingTracestate = event?.traceContext?.tracestate || event?.metadata?.tracestate;
-        let parentContext = context.active();
-        if (incomingTraceparent) {
-          const extracted = extractTraceContext({
-            traceparent: incomingTraceparent,
-            tracestate: incomingTracestate,
+        // Keep an explicit link to a cross-process `traceparent` parent as a
+        // secondary signal (aids fan-out queries) when one was present. The
+        // re-parenting above is what actually joins the traces; this link is
+        // additive. In-process subagent parents already nest via the resolved
+        // context, so no separate link is emitted for them here.
+        if (extractedParent) {
+          rootSpan.addLink({
+            context: trace.getSpanContext(extractedParent)!,
+            attributes: { "openclaw.link.type": "subagent_child" },
           });
-          if (extracted) {
-            parentContext = extracted;
-            rootSpan.addLink({
-              context: trace.getSpanContext(extracted)!,
-              attributes: { "openclaw.link.type": "subagent_child" },
-            });
-            logger.debug?.(`[otel] Extracted traceparent from subagent session: ${incomingTraceparent}`);
-          }
+          logger.debug?.(`[otel] Extracted traceparent from subagent session: ${incomingTraceparent}`);
         }
 
         // Store the context so child spans can reference it
@@ -2056,105 +2108,162 @@ export function registerHooks(
   // SUB-AGENT ORCHESTRATION HOOKS
   // ═══════════════════════════════════════════════════════════════════
 
-  // ── subagent_spawning ─────────────────────────────────────────────
-  // Fires when a parent agent spawns a sub-agent. Creates a child span
-  // linked to the parent agent's turn span via the TraceContextStore
-  // sub-agent link table. The child session will resolve parent context
-  // for trace correlation.
+  // ── subagent_spawning (deprecated) + subagent_spawned (current) ────
+  // Both hooks describe the SAME spawn event. `subagent_spawned` (ISI-1627 /
+  // WS1) is the current hook and additionally carries the resolved
+  // model/provider/runId; `subagent_spawning` is retained as a deduped
+  // fallback for runtimes in `[2026.4.21, subagent_spawned floor)` and is
+  // removed upstream after 2026-08-30. We emit ONE span per childSessionKey,
+  // deduping on the parent's `__subagent_<childSessionKey>` activeToolSpans
+  // slot: whichever hook fires first creates the span (and the spawn counter);
+  // a later firing of the sibling hook only ENRICHES that span with any
+  // resolved fields it carries. The span links to the parent agent turn via
+  // the TraceContextStore sub-agent link table so the child session can
+  // resolve parent context (ISI-1627 / WS2).
 
+  /** Apply the `subagent_spawned`-only resolved fields to a spawn span. */
+  function applyResolvedSubagentFields(
+    span: Span,
+    model?: string,
+    provider?: string,
+    runId?: string,
+  ): void {
+    if (model) span.setAttribute(GEN_AI_REQUEST_MODEL, model);
+    if (provider) span.setAttribute(GEN_AI_PROVIDER_NAME, provider);
+    if (runId) span.setAttribute(OC_SUBAGENT_RUN_ID, runId);
+  }
+
+  function recordSubagentSpawn(
+    source: "subagent_spawning" | "subagent_spawned",
+    event: any,
+    ctx: any,
+  ): void {
+    try {
+      const tel = getTelemetry();
+      if (!tel) return;
+      const { tracer, counters } = tel;
+
+      const parentSessionKey =
+        ctx?.sessionKey || ctx?.requesterSessionKey || event?.parentSessionKey || "unknown";
+      const childSessionKey = event?.childSessionKey || event?.sessionKey || "unknown";
+      const childAgentId = event?.childAgentId || event?.agentId || "unknown";
+      const childAgentName =
+        event?.childAgentName || event?.agentName || event?.label || childAgentId;
+      const spawnReason = event?.reason || event?.spawnReason || "unknown";
+      const parentAgentId = ctx?.agentId || event?.parentAgentId || "unknown";
+
+      // Resolved model/provider/runId are only present on `subagent_spawned`.
+      const resolvedModel = typeof event?.resolvedModel === "string" ? event.resolvedModel : undefined;
+      const resolvedProvider =
+        typeof event?.resolvedProvider === "string" ? event.resolvedProvider : undefined;
+      const runId = typeof event?.runId === "string" ? event.runId : undefined;
+
+      const sessionCtx = store.getActiveContext(parentSessionKey);
+      const stashKey = `__subagent_${childSessionKey}`;
+      const existing = sessionCtx?.activeToolSpans?.get(stashKey);
+
+      // Dedupe: the sibling hook already created the span. Enrich it with any
+      // resolved fields this event carries (so a `subagent_spawning`-created
+      // span still gains model/provider/runId from the later `subagent_spawned`
+      // firing), then stop — no second span, no double spawn count.
+      if (existing) {
+        applyResolvedSubagentFields(existing.span, resolvedModel, resolvedProvider, runId);
+        return;
+      }
+
+      const parentContext = store.resolveParentContext(childSessionKey)
+        || sessionCtx?.agentContext
+        || sessionCtx?.rootContext
+        || context.active();
+
+      const span = tracer.startSpan(
+        "openclaw.subagent.spawning",
+        {
+          kind: SpanKind.INTERNAL,
+          attributes: {
+            [GEN_AI_OPERATION_NAME]: OP_INVOKE_AGENT,
+            [GEN_AI_AGENT_ID]: childAgentId,
+            [GEN_AI_AGENT_NAME]: childAgentName,
+            [GEN_AI_CONVERSATION_ID]: childSessionKey,
+            [OC_SUBAGENT_PARENT_SESSION]: parentSessionKey,
+            [OC_SUBAGENT_CHILD_SESSION]: childSessionKey,
+            [OC_SUBAGENT_CHILD_AGENT_ID]: childAgentId,
+            [OC_SUBAGENT_CHILD_AGENT_NAME]: childAgentName,
+            [OC_SUBAGENT_SPAWN_REASON]: spawnReason,
+            ...codeAttrs(source),
+            "openclaw.session.key": parentSessionKey,
+            "openclaw.agent.id": parentAgentId,
+          },
+        },
+        parentContext,
+      );
+
+      applyResolvedSubagentFields(span, resolvedModel, resolvedProvider, runId);
+
+      store.linkSubAgent(childSessionKey, parentSessionKey);
+
+      // ISI-1627 / WS2 — trace propagation into the child is done IN-PROCESS
+      // via this parent↔child link: the child's `message_received` resolves
+      // the parent's live spawn-span context from the store and re-parents the
+      // child `openclaw.request` root under it, so both share one trace.id.
+      // OpenClaw fires the subagent spawn hooks with a fire-and-forget event
+      // object (no mutable `childSession` carrier on any runtime through
+      // v2026.6.11), so header (`traceparent`) injection across the spawn
+      // boundary is not possible from the plugin. Cross-process propagation
+      // would require an upstream pre-spawn mutable carrier (follow-up ask).
+
+      if (sessionCtx?.agentSpan) {
+        span.addLink({
+          context: sessionCtx.agentSpan.spanContext(),
+          attributes: { "openclaw.link.type": "subagent_parent" },
+        });
+      }
+
+      counters.subagentSpawns.add(1, {
+        [OC_SUBAGENT_CHILD_AGENT_NAME]: childAgentName,
+        [OC_SUBAGENT_SPAWN_REASON]: spawnReason,
+      });
+
+      if (sessionCtx) {
+        if (!sessionCtx.activeToolSpans) {
+          sessionCtx.activeToolSpans = new Map();
+        }
+        sessionCtx.activeToolSpans.set(stashKey, { span, startTime: Date.now() });
+      } else {
+        span.setStatus({ code: SpanStatusCode.OK });
+        span.end();
+      }
+
+      logger.debug?.(
+        `[otel] Sub-agent spawn (${source}): parent=${parentSessionKey}, child=${childSessionKey}, agent=${childAgentName}${runId ? `, runId=${runId}` : ""}`,
+      );
+    } catch {
+      // Never let telemetry break spawn.
+    }
+  }
+
+  api.on(
+    "subagent_spawned",
+    (event: any, ctx: any) => {
+      recordSubagentSpawn("subagent_spawned", event, ctx);
+      return undefined;
+    },
+    { priority: 60 },
+  );
+
+  logger.info("[otel] Registered subagent_spawned hook (via api.on)");
+
+  // Deprecated fallback — retained until upstream removeAfter 2026-08-30.
   api.on(
     "subagent_spawning",
     (event: any, ctx: any) => {
-      try {
-        const tel = getTelemetry();
-        if (!tel) return undefined;
-        const { tracer, counters } = tel;
-
-        const parentSessionKey = ctx?.sessionKey || event?.parentSessionKey || "unknown";
-        const childSessionKey = event?.childSessionKey || event?.sessionKey || "unknown";
-        const childAgentId = event?.childAgentId || event?.agentId || "unknown";
-        const childAgentName = event?.childAgentName || event?.agentName || childAgentId;
-        const spawnReason = event?.reason || event?.spawnReason || "unknown";
-        const parentAgentId = ctx?.agentId || event?.parentAgentId || "unknown";
-
-        const parentContext = store.resolveParentContext(childSessionKey)
-          || store.getActiveContext(parentSessionKey)?.agentContext
-          || store.getActiveContext(parentSessionKey)?.rootContext
-          || context.active();
-
-        const span = tracer.startSpan(
-          "openclaw.subagent.spawning",
-          {
-            kind: SpanKind.INTERNAL,
-            attributes: {
-              [GEN_AI_OPERATION_NAME]: OP_INVOKE_AGENT,
-              [GEN_AI_AGENT_ID]: childAgentId,
-              [GEN_AI_AGENT_NAME]: childAgentName,
-              [GEN_AI_CONVERSATION_ID]: childSessionKey,
-              [OC_SUBAGENT_PARENT_SESSION]: parentSessionKey,
-              [OC_SUBAGENT_CHILD_SESSION]: childSessionKey,
-              [OC_SUBAGENT_CHILD_AGENT_ID]: childAgentId,
-              [OC_SUBAGENT_CHILD_AGENT_NAME]: childAgentName,
-              [OC_SUBAGENT_SPAWN_REASON]: spawnReason,
-              ...codeAttrs("subagent_spawning"),
-              "openclaw.session.key": parentSessionKey,
-              "openclaw.agent.id": parentAgentId,
-            },
-          },
-          parentContext
-        );
-
-        store.linkSubAgent(childSessionKey, parentSessionKey);
-
-        // ISI-1021: Inject W3C trace context into child session metadata
-        // so the subagent can extract it and continue the trace.
-        const traceHeaders: Record<string, string> = {};
-        injectTraceContext(traceHeaders, context.active());
-        if (traceHeaders.traceparent && event.childSession) {
-          event.childSession.traceContext = {
-            traceparent: traceHeaders.traceparent,
-            tracestate: traceHeaders.tracestate,
-          };
-          logger.debug?.(`[otel] Injected traceparent into child session: ${traceHeaders.traceparent}`);
-        }
-
-        if (store.getActiveContext(parentSessionKey)?.agentSpan) {
-          const parentSpan = store.getActiveContext(parentSessionKey)!.agentSpan!;
-          span.addLink({
-            context: parentSpan.spanContext(),
-            attributes: { "openclaw.link.type": "subagent_parent" },
-          });
-        }
-
-        counters.subagentSpawns.add(1, {
-          [OC_SUBAGENT_CHILD_AGENT_NAME]: childAgentName,
-          [OC_SUBAGENT_SPAWN_REASON]: spawnReason,
-        });
-
-        const sessionCtx = store.getActiveContext(parentSessionKey);
-        if (sessionCtx) {
-          if (!sessionCtx.activeToolSpans) {
-            sessionCtx.activeToolSpans = new Map();
-          }
-          sessionCtx.activeToolSpans.set(`__subagent_${childSessionKey}`, {
-            span,
-            startTime: Date.now(),
-          });
-        } else {
-          span.setStatus({ code: SpanStatusCode.OK });
-          span.end();
-        }
-
-        logger.debug?.(`[otel] Sub-agent spawning: parent=${parentSessionKey}, child=${childSessionKey}, agent=${childAgentName}`);
-      } catch {
-      }
-
+      recordSubagentSpawn("subagent_spawning", event, ctx);
       return undefined;
     },
-    { priority: 60 }
+    { priority: 60 },
   );
 
-  logger.info("[otel] Registered subagent_spawning hook (via api.on)");
+  logger.info("[otel] Registered subagent_spawning fallback hook (via api.on)");
 
   // ── subagent_delivery_target ──────────────────────────────────────
   // Fires when the parent delivers a target (task/prompt) to the child
