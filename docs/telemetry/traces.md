@@ -112,11 +112,29 @@ Created by the `tool_result_persist` hook. Child of the agent turn span.
 | `openclaw.tool.is_synthetic` | boolean | Whether the tool call is synthetic |
 | `openclaw.tool.result_chars` | int | Total characters in result |
 | `openclaw.tool.result_parts` | int | Number of content parts in result |
+| `openclaw.tool.error_preview` | string | **Failure paths only.** Bounded, redacted preview of the tool error text. Gated by `captureContent.toolErrorMessages`; redacted before truncation (1024 chars) |
+| `openclaw.tool.kind` | string | Tool provider classification (e.g. `builtin` vs `mcp`), from `before_tool_call`. *Unreleased — see note below.* |
+| `openclaw.tool.input_kind` | string | Shape of the tool input (e.g. `command`, `file`, `query`), from `before_tool_call`. *Unreleased.* |
+| `openclaw.tool.derived_paths` | string[] | Filesystem paths the call will touch (file blast-radius). Capped at 50 entries / 512 chars each; each entry redacted before truncation. *Unreleased.* |
 | `openclaw.session.key` | string | Session identifier |
 | `openclaw.agent.id` | string | Agent identifier |
 | `gen_ai.tool.name` | string | Tool name (GenAI semconv) |
 | `gen_ai.operation.name` | string | `execute_tool` |
 | `traceloop.span.kind` | string | `tool` — Traceloop/OpenLLMetry marker read by Dynatrace AI Observability |
+
+> `openclaw.tool.error_preview` (ISI-1318) shipped in **0.7.0**. It is written
+> only when a tool call fails. Its `captureContent.toolErrorMessages` gate is
+> the one content flag that defaults **on** when `captureContent` is supplied
+> as an object — error text is operational data, a different privacy class
+> from prompt/response bodies. See
+> [Configuration → `captureContent`](../configuration.md#capturecontent-gateway-launch-setting).
+
+> **Unreleased (ISI-1629):** the tool-span enrichment keys
+> `openclaw.tool.kind`, `openclaw.tool.input_kind`, and
+> `openclaw.tool.derived_paths` are on a feature branch, **not yet merged to
+> `main`** or in a tagged release. They are read from the already-subscribed
+> `before_tool_call` hook — additive only, no `minOpenClawVersion` bump. This
+> reference will move them into the released set once the change lands.
 
 **Status:** `OK` on success, `ERROR` if the tool returned an error.
 

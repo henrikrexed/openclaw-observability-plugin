@@ -16,26 +16,48 @@ The plugin follows a two-track support model. Pick the plugin track that matches
 | `0.1.x`      | `< 2026.4.21`     | `release/0.1.x`  | Maintenance — security + critical regressions only        | Through **2026-10-21**                         |
 | `0.2.x`      | `>= 2026.4.21`    | `main`           | Superseded by 0.3.x                                      | Replaced by 0.3.x                             |
 | `0.3.x`      | `>= 2026.4.21`    | `main`           | Active — V3 features, log pipeline, bug fixes             | Default going forward                          |
-| `0.6.x`      | `>= 2026.5.13`    | `main`           | Active — Dashboard, diagnostics, token types, telemetry   | Latest release                                 |
+| `0.6.x`      | `>= 2026.5.13`    | `main`           | Superseded by 0.7.x / 0.8.x                              | Replaced by 0.8.x                             |
+| `0.7.x`      | `>= 2026.5.13`    | `main`           | Superseded by 0.8.x                                     | Replaced by 0.8.x                             |
+| `0.8.x`      | `>= 2026.5.13`    | `main`           | Active — GenAI content keys, compaction & subagent spans, tool-error previews | Latest release                                 |
 
 > OpenClaw `2026.4.21` introduced the `before_model_resolve` and `before_prompt_build` hooks and deprecated `before_agent_start`. The `0.2.x` line targets the new hooks; the `0.1.x` line remains on the legacy hook for existing deployments.
 
-## What's New in 0.6.0
+## What's New in 0.8.0
 
-**Released:** 2026-05-13
+**Released:** 2026-07-08
 
 ### Features
-- **Plugin-only dashboard** — Built-in dashboard using collected metrics, spans, and logs for quick observability without external tooling
+- **GenAI content keys for Dynatrace AI Observability** *(ISI-1605, schema 1.4.0)* — Emits the stable OTel GenAI content keys (`gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`, `gen_ai.prompt.prompt_filter_results`, `gen_ai.completion.content_filter_results`) **alongside** the existing `openclaw.content.*` mirrors, sharing the same policy gate and redaction funnel. Adds the `traceloop.span.kind` classifier (`task` on agent-turn spans, `tool` on tool spans) for agent-vs-tool attribution. All content keys are **opt-in** and default **off** — they carry prompt/response bodies (PII). See [Dynatrace → AI Observability](https://henrikrexed.github.io/openclaw-observability-plugin/backends/dynatrace/#ai-observability-gen_ai-content-keys) and [Privacy](https://henrikrexed.github.io/openclaw-observability-plugin/security/privacy/).
+- **Compaction spans & metrics** *(ISI-1628)* — `openclaw.compaction` span plus counter/histogram around `before_compaction` / `after_compaction`.
+- **Subagent trace propagation** *(ISI-1627)* — `subagent_spawned` migration with end-to-end trace propagation into child sessions.
 
-### Improvements
+## What's New in 0.7.0
+
+**Released:** 2026-06-17
+
+### Features
+- **Bounded, redacted tool-error previews** *(ISI-1318)* — Failed tool calls now stamp a redacted, length-capped `openclaw.tool.error_preview` on the tool span so you can triage failures without opening the raw payload. Text is **redacted first, then truncated** to 1024 chars (so a secret straddling the cut can't leak). Gated by the new `captureContent.toolErrorMessages` flag — the one content flag that defaults **on** when `captureContent` is supplied as an object, because error text is operational data, a different privacy class from prompt/response bodies. See [Configuration → `captureContent`](https://henrikrexed.github.io/openclaw-observability-plugin/configuration/#capturecontent-gateway-launch-setting).
+
+## Unreleased (on `main`'s feature branch)
+
+Merged in code review but **not yet in a tagged release**. All changes are **additive** — no keys removed or renamed.
+
+### Tool-span enrichment *(ISI-1629, schema 1.5.0)*
+- Three new tool-span attributes read from the already-subscribed `before_tool_call` hook (no `minOpenClawVersion` bump):
+  - `openclaw.tool.kind` — tool-provider classification (e.g. `builtin`, `mcp`) for tool attribution.
+  - `openclaw.tool.input_kind` — the shape of the tool input (e.g. `command`, `file`, `query`).
+  - `openclaw.tool.derived_paths` — bounded, redacted array of filesystem paths the call will touch, for file blast-radius analysis (capped at 50 entries / 512 chars each; each entry redacted before truncation).
+
+<details>
+<summary>What's New in 0.6.0 (2026-05-13)</summary>
+
+- **Plugin-only dashboard** — Built-in dashboard using collected metrics, spans, and logs for quick observability without external tooling
 - **Token types** — Added `cache_read` and `cache_creation` token types for `gen_ai.client.token.usage` histogram
 - **Diagnostics** — Improved diagnostic event handling with internal module fallback, debug logging, and health metrics wiring
-- **Telemetry** — Prevented double-registration breaking span parent chains
-- **Hooks** — Trace context store persistence across plugin reloads, error logging for `message_received`
+- **Telemetry** — Prevented double-registration breaking span parent chains; trace context store persistence across plugin reloads
+- **Bug fixes** — Dashboard hostname filter and CPU utilization corrections; cache token type defaults for missing data
 
-### Bug Fixes
-- Dashboard hostname filter corrections and CPU utilization metric fixes
-- Cache token type handling with proper defaults for missing data
+</details>
 
 ## Two Approaches to Observability
 
