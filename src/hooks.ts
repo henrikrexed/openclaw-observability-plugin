@@ -68,6 +68,14 @@ import {
   GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
   GEN_AI_USAGE_INPUT_TOKENS,
   GEN_AI_USAGE_OUTPUT_TOKENS,
+  GEN_AI_INPUT_MESSAGES,
+  GEN_AI_OUTPUT_MESSAGES,
+  GEN_AI_SYSTEM_INSTRUCTIONS,
+  GEN_AI_PROMPT_FILTER_RESULTS,
+  GEN_AI_COMPLETION_CONTENT_FILTER_RESULTS,
+  TRACELOOP_SPAN_KIND,
+  TRACELOOP_SPAN_KIND_TASK,
+  TRACELOOP_SPAN_KIND_TOOL,
   OP_CHAT,
   OP_EXECUTE_TOOL,
   OP_INVOKE_AGENT,
@@ -550,6 +558,8 @@ export function registerHooks(
               [GEN_AI_AGENT_ID]: agentId,
               [GEN_AI_AGENT_NAME]: agentId,
               [GEN_AI_CONVERSATION_ID]: sessionKey,
+              // Traceloop/OpenLLMetry marker: agent turn = "task" (ISI-1605).
+              [TRACELOOP_SPAN_KIND]: TRACELOOP_SPAN_KIND_TASK,
               // NOTE: gen_ai.request.model is intentionally omitted here.
               // The model is still being resolved. gen_ai.response.model
               // is written at agent_end from diagnostic usage events.
@@ -679,6 +689,16 @@ export function registerHooks(
             messagesArr,
           );
         }
+        // gen_ai.input.messages (ISI-1605) — Dynatrace AI Observability key.
+        // Prefer the structured messages array; fall back to the flat prompt
+        // when no array is present. Same policy gate + redact-before-truncate
+        // funnel as the openclaw.content.* mirror above.
+        captureContentAttribute(
+          agentSpan,
+          contentPolicy.inputMessages,
+          GEN_AI_INPUT_MESSAGES,
+          messagesArr.length > 0 ? messagesArr : prompt || undefined,
+        );
         const systemPrompt =
           typeof event?.systemPrompt === "string"
             ? event.systemPrompt
@@ -689,6 +709,14 @@ export function registerHooks(
           agentSpan,
           contentPolicy.systemPrompt,
           "openclaw.content.system_prompt",
+          systemPrompt,
+        );
+        // gen_ai.system_instructions (ISI-1605) — prompt-content key, distinct
+        // from gen_ai.provider.name. Gated by the systemPrompt policy flag.
+        captureContentAttribute(
+          agentSpan,
+          contentPolicy.systemPrompt,
+          GEN_AI_SYSTEM_INSTRUCTIONS,
           systemPrompt,
         );
       } catch {
@@ -811,6 +839,22 @@ export function registerHooks(
         if (cacheWrite > 0) {
           llmSpan.setAttribute(GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, cacheWrite);
         }
+
+        // Content-filter results (ISI-1605). Azure/OpenAI return these on the
+        // response; they can echo flagged prompt/completion content, so gate
+        // them behind the same policy flags and route through redaction.
+        captureContentAttribute(
+          llmSpan,
+          contentPolicy.inputMessages,
+          GEN_AI_PROMPT_FILTER_RESULTS,
+          event?.promptFilterResults ?? event?.prompt_filter_results,
+        );
+        captureContentAttribute(
+          llmSpan,
+          contentPolicy.outputMessages,
+          GEN_AI_COMPLETION_CONTENT_FILTER_RESULTS,
+          event?.contentFilterResults ?? event?.content_filter_results,
+        );
 
         const durationMs =
           typeof event?.durationMs === "number"
@@ -975,6 +1019,20 @@ export function registerHooks(
         if (cacheCreationInputTokens > 0) {
           span.setAttribute(GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, cacheCreationInputTokens);
         }
+
+        // Content-filter results (ISI-1605) — see llm_output for rationale.
+        captureContentAttribute(
+          span,
+          contentPolicy.inputMessages,
+          GEN_AI_PROMPT_FILTER_RESULTS,
+          event?.promptFilterResults ?? event?.prompt_filter_results,
+        );
+        captureContentAttribute(
+          span,
+          contentPolicy.outputMessages,
+          GEN_AI_COMPLETION_CONTENT_FILTER_RESULTS,
+          event?.contentFilterResults ?? event?.content_filter_results,
+        );
 
         const durationMs =
           typeof event?.durationMs === "number"
@@ -1149,6 +1207,8 @@ export function registerHooks(
               [GEN_AI_TOOL_CALL_ID]: toolCallId,
               [GEN_AI_CONVERSATION_ID]: sessionKey,
               [GEN_AI_AGENT_ID]: agentId,
+              // Traceloop/OpenLLMetry marker: tool invocation (ISI-1605).
+              [TRACELOOP_SPAN_KIND]: TRACELOOP_SPAN_KIND_TOOL,
               ...codeAttrs("before_tool_call"),
               "openclaw.tool.name": toolName,
               "openclaw.tool.call_id": toolCallId,
@@ -1441,6 +1501,8 @@ export function registerHooks(
               [GEN_AI_TOOL_CALL_ID]: toolCallId,
               [GEN_AI_CONVERSATION_ID]: sessionKey,
               [GEN_AI_AGENT_ID]: agentId,
+              // Traceloop/OpenLLMetry marker: tool invocation (ISI-1605).
+              [TRACELOOP_SPAN_KIND]: TRACELOOP_SPAN_KIND_TOOL,
               ...codeAttrs("tool_result_persist"),
               "openclaw.tool.name": toolName,
               "openclaw.tool.call_id": toolCallId,
@@ -1570,6 +1632,14 @@ export function registerHooks(
           span,
           contentPolicy.outputMessages,
           "openclaw.content.output_message",
+          messageText,
+        );
+        // gen_ai.output.messages (ISI-1605) — Dynatrace AI Observability key,
+        // same policy gate + redaction funnel as the mirror above.
+        captureContentAttribute(
+          span,
+          contentPolicy.outputMessages,
+          GEN_AI_OUTPUT_MESSAGES,
           messageText,
         );
 

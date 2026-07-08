@@ -2661,6 +2661,236 @@ describe("content capture policy gating (ISI-1000)", () => {
   });
 });
 
+// ── ISI-1605: gen_ai content keys + traceloop.span.kind ─────────────
+//
+// Dynatrace AI Observability reads a set of gen_ai.* content keys plus the
+// Traceloop vendor marker `traceloop.span.kind`. The content keys carry
+// prompt/completion BODIES (PII), so they must (a) emit ONLY when the
+// matching captureContent flag is on, and (b) route through the same
+// redact-before-truncate funnel as the openclaw.content.* mirrors.
+
+describe("ISI-1605: gen_ai content keys + traceloop.span.kind", () => {
+  let stopHooks: (() => void) | undefined;
+
+  afterEach(() => {
+    try {
+      stopHooks?.();
+    } catch {
+      // ignore — best-effort teardown
+    }
+    stopHooks = undefined;
+  });
+
+  it("emits gen_ai.input.messages + gen_ai.system_instructions on the agent turn when gated on", async () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ inputMessages: true, systemPrompt: true }),
+    );
+
+    await Promise.resolve(
+      typedHooks.get("message_received")!(
+        { channel: "cli", sessionKey: "s1", from: "user", text: "hello" },
+        { sessionKey: "s1" },
+      ),
+    );
+    typedHooks.get("before_model_resolve")!({}, { agentId: "a1", sessionKey: "s1" });
+    typedHooks.get("before_prompt_build")!(
+      {
+        prompt: "hello prompt",
+        messages: [{ role: "user", content: "hi" }],
+        systemPrompt: "be helpful and safe",
+      },
+      { agentId: "a1", sessionKey: "s1" },
+    );
+
+    const turn = spans.find((s) => s.spanName === "openclaw.agent.turn");
+    expect(turn!.attrs["gen_ai.input.messages"]).toBe(
+      JSON.stringify([{ role: "user", content: "hi" }]),
+    );
+    expect(turn!.attrs["gen_ai.system_instructions"]).toBe("be helpful and safe");
+
+    stopHooks();
+  });
+
+  it("falls back to the flat prompt for gen_ai.input.messages when no messages array is present", async () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ inputMessages: true }),
+    );
+
+    await Promise.resolve(
+      typedHooks.get("message_received")!(
+        { channel: "cli", sessionKey: "s1", from: "u", text: "hi" },
+        { sessionKey: "s1" },
+      ),
+    );
+    typedHooks.get("before_model_resolve")!({}, { agentId: "a1", sessionKey: "s1" });
+    typedHooks.get("before_prompt_build")!(
+      { prompt: "flat prompt only" },
+      { agentId: "a1", sessionKey: "s1" },
+    );
+
+    const turn = spans.find((s) => s.spanName === "openclaw.agent.turn");
+    expect(turn!.attrs["gen_ai.input.messages"]).toBe("flat prompt only");
+
+    stopHooks();
+  });
+
+  it("does NOT emit gen_ai content keys when the policy is all-off (default)", async () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, configWithPolicy({}));
+
+    await Promise.resolve(
+      typedHooks.get("message_received")!(
+        { channel: "cli", sessionKey: "s1", from: "u", text: "hi" },
+        { sessionKey: "s1" },
+      ),
+    );
+    typedHooks.get("before_model_resolve")!({}, { agentId: "a1", sessionKey: "s1" });
+    typedHooks.get("before_prompt_build")!(
+      {
+        prompt: "hello prompt",
+        messages: [{ role: "user", content: "hi" }],
+        systemPrompt: "sys",
+      },
+      { agentId: "a1", sessionKey: "s1" },
+    );
+    typedHooks.get("message_sent")!(
+      { sessionKey: "s1", channel: "cli", to: "u", text: "the reply" },
+      { sessionKey: "s1" },
+    );
+
+    const turn = spans.find((s) => s.spanName === "openclaw.agent.turn");
+    const sent = spans.find((s) => s.spanName === "openclaw.message.sent");
+    expect(turn!.attrs["gen_ai.input.messages"]).toBeUndefined();
+    expect(turn!.attrs["gen_ai.system_instructions"]).toBeUndefined();
+    expect(sent!.attrs["gen_ai.output.messages"]).toBeUndefined();
+
+    stopHooks();
+  });
+
+  it("emits gen_ai.output.messages on the message.sent span when outputMessages is on", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ outputMessages: true }),
+    );
+
+    typedHooks.get("message_sent")!(
+      { sessionKey: "s1", channel: "cli", to: "user", text: "the reply" },
+      { sessionKey: "s1" },
+    );
+
+    const sent = spans.find((s) => s.spanName === "openclaw.message.sent");
+    expect(sent!.attrs["gen_ai.output.messages"]).toBe("the reply");
+
+    stopHooks();
+  });
+
+  it("redacts secrets in gen_ai.output.messages (redact-before-truncate funnel)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ outputMessages: true }),
+    );
+
+    const apiKey = "sk-ant-AAAABBBBCCCCDDDDEEEE";
+    typedHooks.get("message_sent")!(
+      { sessionKey: "s1", channel: "cli", to: "user", text: `key ${apiKey}` },
+      { sessionKey: "s1" },
+    );
+
+    const sent = spans.find((s) => s.spanName === "openclaw.message.sent");
+    const captured = sent!.attrs["gen_ai.output.messages"] as string;
+    expect(captured).toContain("[REDACTED_API_KEY]");
+    expect(captured).not.toContain(apiKey);
+
+    stopHooks();
+  });
+
+  it("marks the agent turn span traceloop.span.kind=task (unconditional)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    // Policy all-off: the marker is metadata, not content, so it always emits.
+    stopHooks = registerHooks(api, () => telemetry, configWithPolicy({}));
+
+    typedHooks.get("before_model_resolve")!({}, { agentId: "a1", sessionKey: "s1" });
+
+    const turn = spans.find((s) => s.spanName === "openclaw.agent.turn");
+    expect(turn!.attrs["traceloop.span.kind"]).toBe("task");
+
+    stopHooks();
+  });
+
+  it("marks tool spans traceloop.span.kind=tool (unconditional)", async () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, configWithPolicy({}));
+
+    await Promise.resolve(
+      typedHooks.get("message_received")!(
+        { channel: "cli", sessionKey: "s1", from: "u" },
+        { sessionKey: "s1" },
+      ),
+    );
+    typedHooks.get("before_tool_call")!(
+      { toolName: "Read", toolCallId: "call-1", input: { path: "/tmp/f" } },
+      { sessionKey: "s1", agentId: "a1" },
+    );
+
+    const toolSpan = spans.find((s) => s.spanName === "execute_tool Read");
+    expect(toolSpan!.attrs["traceloop.span.kind"]).toBe("tool");
+
+    stopHooks();
+  });
+
+  it("emits redacted content-filter results on model_call_ended, gated by policy", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(
+      api,
+      () => telemetry,
+      configWithPolicy({ inputMessages: true, outputMessages: true }),
+    );
+
+    typedHooks.get("before_model_resolve")!({}, { agentId: "a1", sessionKey: "s1" });
+    typedHooks.get("model_call_started")!(
+      { sessionKey: "s1", agentId: "a1", model: "gpt-4o", provider: "openai" },
+      { sessionKey: "s1" },
+    );
+    typedHooks.get("model_call_ended")!(
+      {
+        sessionKey: "s1",
+        responseModel: "gpt-4o",
+        promptFilterResults: [{ category: "hate", severity: "safe" }],
+        contentFilterResults: { self_harm: { filtered: false } },
+      },
+      { sessionKey: "s1" },
+    );
+
+    const chat = spans.find((s) => s.spanName === "chat gpt-4o");
+    expect(chat!.attrs["gen_ai.prompt.prompt_filter_results"]).toBe(
+      JSON.stringify([{ category: "hate", severity: "safe" }]),
+    );
+    expect(chat!.attrs["gen_ai.completion.content_filter_results"]).toBe(
+      JSON.stringify({ self_harm: { filtered: false } }),
+    );
+
+    stopHooks();
+  });
+});
+
 // ── ISI-1004: closure of the ISI-994 dual-emit window ───────────────
 //
 // Schema 1.2.0 dual-emitted four groups of legacy attributes alongside
