@@ -182,6 +182,12 @@ Install the plugin from npm. This is the path that the [openclaw-operator](https
 npm install @henrikrexed/openclaw-otel-observability
 ```
 
+Or install it directly through OpenClaw's plugin manager (pin the version to the current release):
+
+```bash
+openclaw plugins install --force npm:@henrikrexed/openclaw-otel-observability@0.7.0
+```
+
 Then add it to your `openclaw.json`:
 
 ```json
@@ -207,7 +213,7 @@ kind: OpenClawInstance
 spec:
   plugins:
     - name: "@henrikrexed/openclaw-otel-observability"
-      version: "^0.3.1"
+      version: "^0.7.0"
 ```
 
 Clear the jiti cache and restart the gateway:
