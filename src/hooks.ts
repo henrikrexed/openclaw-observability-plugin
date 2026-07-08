@@ -2120,6 +2120,22 @@ export function registerHooks(
   // resolved fields it carries. The span links to the parent agent turn via
   // the TraceContextStore sub-agent link table so the child session can
   // resolve parent context (ISI-1627 / WS2).
+  //
+  // The span keeps the name "openclaw.subagent.spawning" regardless of which
+  // hook created it — dashboards/alerts key off that stable name; the origin
+  // is distinguished by `code.function.name`. Do not rename per-source.
+  //
+  // Dedup edge case (Copilot review, ISI-1633): when the parent has NO active
+  // session context at spawn time (`sessionCtx == null` — parent spawns before
+  // its own first message), there is no `activeToolSpans` map to stash the span
+  // in, so the sibling hook's dedup check would miss and emit a SECOND span +
+  // double the spawn counter (and the resolved fields from `subagent_spawned`
+  // would be lost). We hold such orphan spawn spans in this closure-scoped map,
+  // keyed by the same `__subagent_<childSessionKey>` stash key, so dedup and
+  // enrichment work identically to the sessionCtx path. Ended by
+  // `subagent_ended`, with a size-bounded backstop against a missing end event.
+  const orphanSubagentSpans = new Map<string, { span: Span; startTime: number }>();
+  const ORPHAN_SPAWN_SPAN_CAP = 256;
 
   /** Apply the `subagent_spawned`-only resolved fields to a spawn span. */
   function applyResolvedSubagentFields(
@@ -2160,7 +2176,10 @@ export function registerHooks(
 
       const sessionCtx = store.getActiveContext(parentSessionKey);
       const stashKey = `__subagent_${childSessionKey}`;
-      const existing = sessionCtx?.activeToolSpans?.get(stashKey);
+      // Look in the parent's activeToolSpans first, then the orphan holding map
+      // (no-sessionCtx path) so the sibling hook dedups + enriches in BOTH cases.
+      const existing =
+        sessionCtx?.activeToolSpans?.get(stashKey) ?? orphanSubagentSpans.get(stashKey);
 
       // Dedupe: the sibling hook already created the span. Enrich it with any
       // resolved fields this event carries (so a `subagent_spawning`-created
@@ -2230,8 +2249,20 @@ export function registerHooks(
         }
         sessionCtx.activeToolSpans.set(stashKey, { span, startTime: Date.now() });
       } else {
-        span.setStatus({ code: SpanStatusCode.OK });
-        span.end();
+        // No parent session context to hang the span's lifecycle on. Hold it in
+        // the closure-scoped orphan map (keyed identically) so the sibling hook
+        // dedups + enriches instead of emitting a second span + double count.
+        // Backstop: if `subagent_ended` never arrives, cap the map and end the
+        // oldest held span so a degenerate runtime can't leak spans unbounded.
+        if (orphanSubagentSpans.size >= ORPHAN_SPAWN_SPAN_CAP) {
+          const oldestKey = orphanSubagentSpans.keys().next().value as string | undefined;
+          if (oldestKey !== undefined) {
+            const stale = orphanSubagentSpans.get(oldestKey);
+            orphanSubagentSpans.delete(oldestKey);
+            stale?.span.end();
+          }
+        }
+        orphanSubagentSpans.set(stashKey, { span, startTime: Date.now() });
       }
 
       logger.debug?.(
@@ -2346,7 +2377,11 @@ export function registerHooks(
 
         const parentSessionCtx = store.getActiveContext(parentSessionKey);
         const subagentKey = `__subagent_${childSessionKey}`;
-        const active = parentSessionCtx?.activeToolSpans?.get(subagentKey);
+        // Spawn span may live in the parent's activeToolSpans (normal path) or
+        // in the orphan holding map (no-sessionCtx spawn — ISI-1633 dedup fix).
+        const active =
+          parentSessionCtx?.activeToolSpans?.get(subagentKey) ??
+          orphanSubagentSpans.get(subagentKey);
 
         if (active) {
           const { span, startTime } = active;
@@ -2395,7 +2430,8 @@ export function registerHooks(
           }
 
           span.end();
-          parentSessionCtx!.activeToolSpans!.delete(subagentKey);
+          parentSessionCtx?.activeToolSpans?.delete(subagentKey);
+          orphanSubagentSpans.delete(subagentKey);
         }
 
         counters.subagentEnded.add(1, {
@@ -2853,9 +2889,22 @@ export function registerHooks(
     if (cleaned > 0) {
       logger.debug?.(`[otel] Cleaned up ${cleaned} stale trace contexts`);
     }
+    // ISI-1633 — sweep orphan spawn spans whose `subagent_ended` never arrived.
+    const now = Date.now();
+    for (const [key, held] of orphanSubagentSpans) {
+      if (now - held.startTime > maxAge) {
+        orphanSubagentSpans.delete(key);
+        held.span.end();
+      }
+    }
   }, 60_000);
 
   return () => {
     clearInterval(cleanupInterval);
+    // Flush any orphan spawn spans still held so shutdown doesn't drop them.
+    for (const [key, held] of orphanSubagentSpans) {
+      orphanSubagentSpans.delete(key);
+      held.span.end();
+    }
   };
 }

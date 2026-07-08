@@ -2225,6 +2225,72 @@ describe("subagent_spawned migration + end-to-end trace propagation (ISI-1627)",
     stopHooks();
   });
 
+  it("dedupes both hooks with NO parent session context — one span, one count, resolved fields kept (ISI-1633)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const spawning = typedHooks.get("subagent_spawning")!;
+    const spawned = typedHooks.get("subagent_spawned")!;
+
+    // NOTE: no before_model_resolve / message_received for "parent-sess", so the
+    // parent has NO active session context. Both hooks still fire (modern
+    // runtime): spawning first (no resolved fields), then spawned. Without the
+    // orphan-holding dedup this produced TWO spans + double count and dropped
+    // the resolved model/provider/run_id.
+    spawning(
+      { childSessionKey: "child-sess", childAgentId: "c", childAgentName: "c", reason: "delegation" },
+      { sessionKey: "parent-sess", agentId: "parent-agent" },
+    );
+    spawned(
+      {
+        runId: "run-77",
+        childSessionKey: "child-sess",
+        agentId: "c",
+        label: "c",
+        resolvedModel: "anthropic/claude-opus-4",
+        resolvedProvider: "anthropic",
+      },
+      { sessionKey: "parent-sess" },
+    );
+
+    const spawnSpans = spans.filter((s) => s.spanName === "openclaw.subagent.spawning");
+    expect(spawnSpans).toHaveLength(1); // single span despite two firings, no sessionCtx
+    expect(telemetry.counters.subagentSpawns.add).toHaveBeenCalledTimes(1); // counted once
+    // Resolved fields from the later spawned firing survive on the held span.
+    expect(spawnSpans[0].attrs["gen_ai.request.model"]).toBe("anthropic/claude-opus-4");
+    expect(spawnSpans[0].attrs["gen_ai.provider.name"]).toBe("anthropic");
+    expect(spawnSpans[0].attrs["openclaw.subagent.run_id"]).toBe("run-77");
+
+    stopHooks();
+  });
+
+  it("subagent_ended closes an orphan spawn span held with no parent session context (ISI-1633)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const spawned = typedHooks.get("subagent_spawned")!;
+    const ended = typedHooks.get("subagent_ended")!;
+
+    spawned(
+      { runId: "run-5", childSessionKey: "child-sess", agentId: "c", label: "c", resolvedModel: "m", resolvedProvider: "p" },
+      { sessionKey: "parent-sess" },
+    );
+    const spawnSpan = spans.find((s) => s.spanName === "openclaw.subagent.spawning")!;
+    expect(spawnSpan).toBeDefined();
+    expect(spawnSpan.ended).toBe(false); // held open, not ended immediately
+
+    ended(
+      { childSessionKey: "child-sess", childAgentName: "c", success: true, durationMs: 12 },
+      { sessionKey: "parent-sess" },
+    );
+    expect(spawnSpan.ended).toBe(true); // closed by subagent_ended via the orphan map
+    expect(spawnSpan.attrs["openclaw.subagent.duration_ms"]).toBe(12);
+
+    stopHooks();
+  });
+
   it("re-parents the child openclaw.request under the parent spawn span (shared trace end-to-end)", () => {
     const { api, typedHooks } = createStubApi();
     const { telemetry, spans } = createTelemetry();
