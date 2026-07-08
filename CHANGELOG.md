@@ -12,6 +12,10 @@ Merged in code review but not yet in a tagged release. Additive — no keys remo
 
 * **ISI-1629:** tool-span enrichment — `openclaw.tool.kind`, `openclaw.tool.input_kind`, and bounded/redacted `openclaw.tool.derived_paths`, read from the already-subscribed `before_tool_call` hook (tool attribution + file blast-radius analysis)
 
+### Bug Fixes
+
+* **ISI-1653:** lifecycle event spans (`openclaw.message.sent`, `openclaw.cron.changed`, `openclaw.dispatch.prepare`) no longer orphan into their own single-span traces. A shared `resolveLifecycleParentContext` walks all store tiers (active → legacy → retained-recent-request → session → gateway) so these spans nest into the request/session trace they belong to, collapsing the previous "1 request → 3-4 traces" fan-out into one trace. A trailing `message_sent` that fires *after* `agent_end` tears down the live context now re-attaches via a bounded, TTL'd (60s) retained request context. The resolved anchor is stamped on each span as `openclaw.trace.parent_source` for diagnosability.
+
 ## [0.8.0](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.7.0...v0.8.0) (2026-07-08)
 
 
