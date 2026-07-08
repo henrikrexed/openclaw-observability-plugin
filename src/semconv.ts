@@ -180,38 +180,9 @@ export const OC_CRON_DURATION_MS = "openclaw.cron.duration_ms";
 export const OC_CRON_SUCCESS = "openclaw.cron.success";
 export const OC_CRON_AGENT_ID = "openclaw.cron.agent_id";
 
-// ── Compaction attribute keys (ISI-1628 / WS3) ──────────────────────
-// Compaction is a major context/token event surfaced via the
-// `before_compaction` / `after_compaction` hooks. These keys land on the
-// `openclaw.compaction` span nested inside the end-to-end session trace.
-/** Why compaction ran. Auto-compaction today has no payload field, so the
- *  emit site defaults to `"auto"` (read defensively for future runtimes). */
-export const OC_COMPACTION_REASON = "openclaw.compaction.reason";
-/** Session message count before compaction. */
-export const OC_COMPACTION_MESSAGES_BEFORE = "openclaw.compaction.messages_before";
-/** Session message count after compaction. */
-export const OC_COMPACTION_MESSAGES_AFTER = "openclaw.compaction.messages_after";
-/** Token count before compaction (when the runtime reports it). */
-export const OC_COMPACTION_TOKENS_BEFORE = "openclaw.compaction.tokens_before";
-/** Token count after compaction (when the runtime reports it). */
-export const OC_COMPACTION_TOKENS_AFTER = "openclaw.compaction.tokens_after";
-/** Tokens reclaimed = `tokens_before − tokens_after` (clamped at 0). */
-export const OC_COMPACTION_TOKENS_RECLAIMED = "openclaw.compaction.tokens_reclaimed";
-/** Wall-clock duration of the compaction span in milliseconds. */
-export const OC_COMPACTION_DURATION_MS = "openclaw.compaction.duration_ms";
-
 /**
  * Schema version for plugin-domain attributes. Bump when emitted
  * attribute keys or values change in a way that consumers need to know.
- *
- * `1.5.0` (ISI-1628) — Additive only. Adds the `openclaw.compaction.*`
- * keys emitted on the new `openclaw.compaction` span (nested inside the
- * session trace): `reason`, `messages_before` / `messages_after`,
- * `tokens_before` / `tokens_after`, `tokens_reclaimed`, `duration_ms`.
- * Adds two metrics: `openclaw.compaction.count` (counter, attr `reason`)
- * and `openclaw.compaction.tokens_reclaimed` (histogram). No `1.4.0` key
- * was removed or renamed. (Sibling ISI-1627 also targets `1.5.0`; whichever
- * PR merges first introduces the bump and the other reconciles this list.)
  *
  * `1.5.0` (ISI-1629) — Additive only. Adds tool-span enrichment keys read
  * from the already-subscribed `before_tool_call` hook:
