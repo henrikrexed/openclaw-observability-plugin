@@ -291,15 +291,40 @@ Operators migrating from other OTel SDKs should configure sampling via `plugins.
 The plugin exposes a `captureContent` field in `plugins.entries.otel-observability.config`. It accepts either:
 
 - a single boolean — `true` turns every capture category on, `false` turns every category off (legacy shape, kept for backwards compatibility), or
-- a granular **`ContentCapturePolicy`** object with five independent flags:
+- a granular **`ContentCapturePolicy`** object with six independent flags:
 
 | Flag | Span attribute(s) | What is captured |
 |------|--------------------|-------------------|
-| `inputMessages` | `openclaw.content.input_message` (request span), `openclaw.content.prompt` / `openclaw.content.messages` (agent.turn span) | Inbound user message + the prompt and message history fed to the LLM |
-| `outputMessages` | `openclaw.content.output_message` (message.sent span) | Outbound assistant reply text |
+| `inputMessages` | `gen_ai.input.messages` + `openclaw.content.input_message` (request span), `openclaw.content.prompt` / `openclaw.content.messages` (agent.turn span), `gen_ai.prompt.prompt_filter_results` (LLM-client span) | Inbound user message + the prompt and message history fed to the LLM |
+| `outputMessages` | `gen_ai.output.messages` + `openclaw.content.output_message` (message.sent span), `gen_ai.completion.content_filter_results` (LLM-client span) | Outbound assistant reply text |
 | `toolInputs` | `openclaw.content.tool_input` (execute_tool span) | Full tool-call input arguments (JSON-stringified, capped at 8192 UTF-16 code units) |
 | `toolOutputs` | `openclaw.content.tool_output` (execute_tool span) | Tool-call result text (text parts of the result message, capped at 8192 UTF-16 code units) |
-| `systemPrompt` | `openclaw.content.system_prompt` (agent.turn span) | System prompt text |
+| `toolErrorMessages` | `openclaw.tool.error_preview` (execute_tool span, failure paths only) | Bounded, redacted preview of the tool error text (redacted, then capped at 1024 chars). **Default differs — see the note below** |
+| `systemPrompt` | `gen_ai.system_instructions` + `openclaw.content.system_prompt` (agent.turn span) | System prompt text |
+
+> The stable `gen_ai.*` content keys (ISI-1605, schema `1.4.0`, shipped in
+> **0.8.0**) are emitted **alongside** the legacy `openclaw.content.*` mirrors —
+> both share the same policy gate and the same redact-before-truncate funnel
+> (8192 UTF-16 code units, surrogate-safe). The `gen_ai.*` keys light up
+> **Dynatrace AI Observability** prompt/response rendering; see
+> [Dynatrace → AI Observability](./backends/dynatrace.md#ai-observability-gen_ai-content-keys).
+> `gen_ai.system_instructions` carries the system-prompt **text** and is
+> intentionally distinct from `gen_ai.provider.name` (provider identity).
+
+> ⚠️ **`toolErrorMessages` default is a special case.** Every other flag
+> defaults **off**. `toolErrorMessages` also defaults **off** when
+> `captureContent` is omitted or set to the boolean `false`, but defaults
+> **on** whenever `captureContent` is supplied as an *object* — error text is
+> operational data, a different privacy class from full prompt/response
+> capture. Set `{ "toolErrorMessages": false }` to opt out explicitly.
+>
+> | `captureContent` value | `toolErrorMessages` → `error_preview` |
+> |------------------------|----------------------------------------|
+> | omitted entirely | **off** |
+> | `false` | **off** |
+> | `true` | **on** |
+> | object, e.g. `{ "toolInputs": true }` | **on** (defaults to `true` when not named) |
+> | object `{ "toolErrorMessages": false }` | **off** (explicit opt-out) |
 
 LLM-client spans emitted by Traceloop (`@traceloop/instrumentation-anthropic`, `@traceloop/instrumentation-openai`) still respect the legacy single-boolean Traceloop flag. The plugin derives it from the policy as `inputMessages || outputMessages || systemPrompt` — the three categories that map to prompt/completion text.
 

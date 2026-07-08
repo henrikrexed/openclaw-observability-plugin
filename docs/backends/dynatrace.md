@@ -127,6 +127,38 @@ fetch spans
 2. Filter: `dt.entity.service = "openclaw-gateway"`
 3. View log records with severity and attributes
 
+## AI Observability (gen_ai content keys)
+
+Dynatrace **AI Observability** renders prompts, responses, and an agent-vs-tool
+call breakdown from OpenTelemetry GenAI semantic-convention attributes. Since
+**0.8.0** (ISI-1605) this plugin emits the keys those views consume:
+
+| Key | Span | Powers |
+|-----|------|--------|
+| `gen_ai.input.messages` | agent turn (`openclaw.agent.turn`) | Prompt / input rendering |
+| `gen_ai.output.messages` | outbound message (`openclaw.message.sent`) | Response rendering |
+| `gen_ai.system_instructions` | agent turn (`openclaw.agent.turn`) | System-prompt rendering |
+| `gen_ai.prompt.prompt_filter_results` | LLM-client span | Azure/OpenAI content-filter payloads |
+| `gen_ai.completion.content_filter_results` | LLM-client span | Azure/OpenAI content-filter payloads |
+| `traceloop.span.kind` | `task` on agent turns, `tool` on tool spans | Agent-vs-tool classification |
+
+- The `gen_ai.*` content keys are **opt-in** and carry prompt/response bodies
+  (**PII by definition**). They emit only when the matching
+  [`captureContent`](../configuration.md#capturecontent-gateway-launch-setting)
+  flag is enabled (`inputMessages`, `outputMessages`, `systemPrompt`) — default
+  off. Each value is redacted, then truncated to 8192 UTF-16 code units. They
+  are emitted alongside the plugin's legacy `openclaw.content.*` mirrors.
+- `traceloop.span.kind` is a Traceloop/OpenLLMetry vendor classifier, **not** a
+  `gen_ai.*` key. It is emitted **unconditionally** (no content gate) so the
+  agent-vs-tool split works even with content capture off.
+- `gen_ai.system_instructions` is the system-prompt **text** — distinct from
+  `gen_ai.provider.name` (provider identity); do not conflate the two.
+
+To light up AI Observability, enable the relevant content flags at gateway
+launch (see [Configuration → `captureContent`](../configuration.md#capturecontent-gateway-launch-setting))
+and review [Privacy](../security/privacy.md) first — content capture ships
+prompt/response bodies to Dynatrace.
+
 ## Example DQL Queries
 
 > The queries below target spans/metrics emitted by **this** plugin. If you only have the built-in `diagnostics-otel` plugin enabled, you'll need to swap `openclaw.llm.*` for `openclaw.tokens` / `openclaw.cost.usd` and adjust the group-by attribute to `openclaw.model`.

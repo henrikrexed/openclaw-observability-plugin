@@ -4,16 +4,21 @@ All notable changes to the `@henrikrexed/openclaw-otel-observability` plugin are
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Merged in code review but not yet in a tagged release. Additive — no keys removed or renamed. The plugin-domain attribute schema (`openclaw.schema.version`) advances to `1.5.0`.
+
+### Features
+
+* **ISI-1629:** tool-span enrichment — `openclaw.tool.kind`, `openclaw.tool.input_kind`, and bounded/redacted `openclaw.tool.derived_paths`, read from the already-subscribed `before_tool_call` hook (tool attribution + file blast-radius analysis)
+
 ## [0.8.0](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.7.0...v0.8.0) (2026-07-08)
 
 
 ### Features
 
-* **ISI-1605:** gen_ai content semconv keys for Dynatrace AI Observability ([c41734f](https://github.com/henrikrexed/openclaw-observability-plugin/commit/c41734f328e2ca22afd775731497528962bd6f09))
 * **ISI-1605:** gen_ai content semconv keys for Dynatrace AI Observability ([e5a6ecf](https://github.com/henrikrexed/openclaw-observability-plugin/commit/e5a6ecf8903d7f1a92761201a9f37443d882b2bb))
-* **ISI-1627:** subagent_spawned migration + end-to-end trace propagation ([b7ebd08](https://github.com/henrikrexed/openclaw-observability-plugin/commit/b7ebd08044410104c3e2af085ef0c6b15f128cba))
 * **ISI-1627:** subagent_spawned migration + end-to-end trace propagation ([0bda813](https://github.com/henrikrexed/openclaw-observability-plugin/commit/0bda813d3f3c162b03b32657835bdcbd1ce6b216))
-* **ISI-1628:** compaction spans + metrics (before/after_compaction) ([c6343f6](https://github.com/henrikrexed/openclaw-observability-plugin/commit/c6343f6c0bbbfa1664c73513fe561527dd636ee5))
 * **ISI-1628:** compaction spans + metrics (before/after_compaction) ([6684ad4](https://github.com/henrikrexed/openclaw-observability-plugin/commit/6684ad4c4cfe79f10caedae644abfa3b2090cfba))
 
 
@@ -26,8 +31,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Features
 
-* **ISI-1318:** bounded redacted error_preview on failed tool spans ([bebeafe](https://github.com/henrikrexed/openclaw-observability-plugin/commit/bebeafef30f6953fb2b528e768568c6d5585e19c))
-* **ISI-1318:** bounded redacted error_preview on failed tool spans ([5874839](https://github.com/henrikrexed/openclaw-observability-plugin/commit/58748393b715abd968fe90a135d650ebdf53bd34))
+* **ISI-1318:** bounded redacted error_preview on failed tool spans, gated by the new `captureContent.toolErrorMessages` flag ([5874839](https://github.com/henrikrexed/openclaw-observability-plugin/commit/58748393b715abd968fe90a135d650ebdf53bd34))
 
 ## [0.6.1](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.6.0...v0.6.1) (2026-06-03)
 
