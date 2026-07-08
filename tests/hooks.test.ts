@@ -10,6 +10,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { trace } from "@opentelemetry/api";
 import type { Counter, Histogram, Span, Tracer, UpDownCounter } from "@opentelemetry/api";
 
 import { registerHooks } from "../src/hooks.js";
@@ -28,14 +29,22 @@ interface SpanSpy {
   ended: boolean;
   status: { code?: number; message?: string };
   spanName: string;
+  /** Parent context passed to `tracer.startSpan` (undefined = trace root). */
+  parentContext?: unknown;
+  /** Unique span id so propagation/parenting can be asserted. */
+  id: string;
 }
 
+let spanSeq = 0;
+
 function createSpanSpy(name: string): Span & SpanSpy {
+  const id = `span-${++spanSeq}`;
   const spy: SpanSpy = {
     attrs: {},
     ended: false,
     status: {},
     spanName: name,
+    id,
   };
   const span = {
     ...spy,
@@ -78,7 +87,7 @@ function createSpanSpy(name: string): Span & SpanSpy {
       return !spy.ended;
     },
     spanContext() {
-      return { traceId: "t", spanId: "s", traceFlags: 1 };
+      return { traceId: "t", spanId: id, traceFlags: 1 };
     },
   };
   return span as unknown as Span & SpanSpy;
@@ -87,11 +96,16 @@ function createSpanSpy(name: string): Span & SpanSpy {
 function createTracerSpy(): { tracer: Tracer; spans: Array<Span & SpanSpy> } {
   const spans: Array<Span & SpanSpy> = [];
   const tracer = {
-    startSpan(name: string, options?: { attributes?: Record<string, unknown> }) {
+    startSpan(
+      name: string,
+      options?: { attributes?: Record<string, unknown> },
+      parentContext?: unknown,
+    ) {
       const span = createSpanSpy(name);
       if (options?.attributes) {
         Object.assign((span as unknown as SpanSpy).attrs, options.attributes);
       }
+      (span as unknown as SpanSpy).parentContext = parentContext;
       spans.push(span);
       return span;
     },
@@ -1862,12 +1876,21 @@ describe("hook registration includes all new lifecycle hooks (ISI-928)", () => {
 describe("subagent_spawning / subagent_delivery_target / subagent_ended hooks (ISI-929)", () => {
   let stopHooks: () => void;
 
+  // The trace-context store is a process-global singleton (survives plugin
+  // reloads by design). These tests reuse fixed session keys, so reset it
+  // between cases for isolation — otherwise a spawn span stashed by one test
+  // leaks into the next and the ISI-1627 spawn dedupe short-circuits it.
+  beforeEach(() => {
+    (globalThis as Record<string, any>)["__openclaw_otel_trace_context_store__"]?.clear();
+  });
+
   it("registers all sub-agent hooks", () => {
     const { api, typedHooks } = createStubApi();
     const { telemetry } = createTelemetry();
     stopHooks = registerHooks(api, () => telemetry, config);
 
     expect(typedHooks.has("subagent_spawning")).toBe(true);
+    expect(typedHooks.has("subagent_spawned")).toBe(true);
     expect(typedHooks.has("subagent_delivery_target")).toBe(true);
     expect(typedHooks.has("subagent_ended")).toBe(true);
 
@@ -2083,6 +2106,254 @@ describe("subagent_spawning / subagent_delivery_target / subagent_ended hooks (I
     );
 
     expect(spawnSpan!.ended).toBe(true);
+
+    stopHooks();
+  });
+});
+
+describe("subagent_spawned migration + end-to-end trace propagation (ISI-1627)", () => {
+  let stopHooks: () => void;
+
+  beforeEach(() => {
+    (globalThis as Record<string, any>)["__openclaw_otel_trace_context_store__"]?.clear();
+  });
+
+  it("subagent_spawned creates a spawn span with resolved model / provider / run_id", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const spawned = typedHooks.get("subagent_spawned")!;
+
+    resolve({}, { agentId: "parent-agent", sessionKey: "parent-sess" });
+
+    const result = spawned(
+      {
+        runId: "run-42",
+        childSessionKey: "child-sess",
+        agentId: "child-agent-id",
+        label: "child-agent",
+        resolvedModel: "anthropic/claude-opus-4",
+        resolvedProvider: "anthropic",
+      },
+      { sessionKey: "parent-sess", requesterSessionKey: "parent-sess" },
+    );
+    expect(result).toBeUndefined();
+
+    const spawnSpan = spans.find((s) => s.spanName === "openclaw.subagent.spawning");
+    expect(spawnSpan).toBeDefined();
+    expect(spawnSpan!.attrs["openclaw.subagent.child_session_key"]).toBe("child-sess");
+    expect(spawnSpan!.attrs["openclaw.subagent.child_agent_id"]).toBe("child-agent-id");
+    expect(spawnSpan!.attrs["openclaw.subagent.child_agent_name"]).toBe("child-agent");
+    // ISI-1627 / WS1 — resolved fields land on the subagent span.
+    expect(spawnSpan!.attrs["gen_ai.request.model"]).toBe("anthropic/claude-opus-4");
+    expect(spawnSpan!.attrs["gen_ai.provider.name"]).toBe("anthropic");
+    expect(spawnSpan!.attrs["openclaw.subagent.run_id"]).toBe("run-42");
+    expect(spawnSpan!.attrs["code.function.name"]).toBe("openclaw.otel.hooks.subagent_spawned");
+    expect(spawnSpan!.ended).toBe(false);
+
+    expect(telemetry.counters.subagentSpawns.add).toHaveBeenCalledTimes(1);
+
+    stopHooks();
+  });
+
+  it("dedupes subagent_spawning + subagent_spawned into ONE span, enriched with resolved fields", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const spawning = typedHooks.get("subagent_spawning")!;
+    const spawned = typedHooks.get("subagent_spawned")!;
+
+    resolve({}, { agentId: "parent-agent", sessionKey: "parent-sess" });
+
+    // Modern runtime fires BOTH: spawning first (pre-spawn, no resolved
+    // fields), then spawned (post-spawn, carries resolved fields).
+    spawning(
+      { childSessionKey: "child-sess", childAgentId: "c", childAgentName: "c", reason: "delegation" },
+      { sessionKey: "parent-sess", agentId: "parent-agent" },
+    );
+    spawned(
+      {
+        runId: "run-9",
+        childSessionKey: "child-sess",
+        agentId: "c",
+        label: "c",
+        resolvedModel: "anthropic/claude-sonnet-4",
+        resolvedProvider: "anthropic",
+      },
+      { sessionKey: "parent-sess" },
+    );
+
+    const spawnSpans = spans.filter((s) => s.spanName === "openclaw.subagent.spawning");
+    expect(spawnSpans).toHaveLength(1); // single span — no double emit
+    // The spawning-created span was enriched by the later spawned firing.
+    expect(spawnSpans[0].attrs["gen_ai.request.model"]).toBe("anthropic/claude-sonnet-4");
+    expect(spawnSpans[0].attrs["gen_ai.provider.name"]).toBe("anthropic");
+    expect(spawnSpans[0].attrs["openclaw.subagent.run_id"]).toBe("run-9");
+    // Counted exactly once despite two hook firings.
+    expect(telemetry.counters.subagentSpawns.add).toHaveBeenCalledTimes(1);
+
+    stopHooks();
+  });
+
+  it("dedupe is order-independent (spawned first, then spawning) — one span, one count", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const resolve = typedHooks.get("before_model_resolve")!;
+    const spawning = typedHooks.get("subagent_spawning")!;
+    const spawned = typedHooks.get("subagent_spawned")!;
+
+    resolve({}, { agentId: "parent-agent", sessionKey: "parent-sess" });
+
+    spawned(
+      { runId: "run-3", childSessionKey: "child-sess", agentId: "c", label: "c", resolvedModel: "m", resolvedProvider: "p" },
+      { sessionKey: "parent-sess" },
+    );
+    spawning(
+      { childSessionKey: "child-sess", childAgentId: "c", childAgentName: "c", reason: "delegation" },
+      { sessionKey: "parent-sess", agentId: "parent-agent" },
+    );
+
+    expect(spans.filter((s) => s.spanName === "openclaw.subagent.spawning")).toHaveLength(1);
+    expect(telemetry.counters.subagentSpawns.add).toHaveBeenCalledTimes(1);
+
+    stopHooks();
+  });
+
+  it("dedupes both hooks with NO parent session context — one span, one count, resolved fields kept (ISI-1633)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const spawning = typedHooks.get("subagent_spawning")!;
+    const spawned = typedHooks.get("subagent_spawned")!;
+
+    // NOTE: no before_model_resolve / message_received for "parent-sess", so the
+    // parent has NO active session context. Both hooks still fire (modern
+    // runtime): spawning first (no resolved fields), then spawned. Without the
+    // orphan-holding dedup this produced TWO spans + double count and dropped
+    // the resolved model/provider/run_id.
+    spawning(
+      { childSessionKey: "child-sess", childAgentId: "c", childAgentName: "c", reason: "delegation" },
+      { sessionKey: "parent-sess", agentId: "parent-agent" },
+    );
+    spawned(
+      {
+        runId: "run-77",
+        childSessionKey: "child-sess",
+        agentId: "c",
+        label: "c",
+        resolvedModel: "anthropic/claude-opus-4",
+        resolvedProvider: "anthropic",
+      },
+      { sessionKey: "parent-sess" },
+    );
+
+    const spawnSpans = spans.filter((s) => s.spanName === "openclaw.subagent.spawning");
+    expect(spawnSpans).toHaveLength(1); // single span despite two firings, no sessionCtx
+    expect(telemetry.counters.subagentSpawns.add).toHaveBeenCalledTimes(1); // counted once
+    // Resolved fields from the later spawned firing survive on the held span.
+    expect(spawnSpans[0].attrs["gen_ai.request.model"]).toBe("anthropic/claude-opus-4");
+    expect(spawnSpans[0].attrs["gen_ai.provider.name"]).toBe("anthropic");
+    expect(spawnSpans[0].attrs["openclaw.subagent.run_id"]).toBe("run-77");
+
+    stopHooks();
+  });
+
+  it("subagent_ended closes an orphan spawn span held with no parent session context (ISI-1633)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const spawned = typedHooks.get("subagent_spawned")!;
+    const ended = typedHooks.get("subagent_ended")!;
+
+    spawned(
+      { runId: "run-5", childSessionKey: "child-sess", agentId: "c", label: "c", resolvedModel: "m", resolvedProvider: "p" },
+      { sessionKey: "parent-sess" },
+    );
+    const spawnSpan = spans.find((s) => s.spanName === "openclaw.subagent.spawning")!;
+    expect(spawnSpan).toBeDefined();
+    expect(spawnSpan.ended).toBe(false); // held open, not ended immediately
+
+    ended(
+      { childSessionKey: "child-sess", childAgentName: "c", success: true, durationMs: 12 },
+      { sessionKey: "parent-sess" },
+    );
+    expect(spawnSpan.ended).toBe(true); // closed by subagent_ended via the orphan map
+    expect(spawnSpan.attrs["openclaw.subagent.duration_ms"]).toBe(12);
+
+    stopHooks();
+  });
+
+  it("re-parents the child openclaw.request under the parent spawn span (shared trace end-to-end)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const messageReceived = typedHooks.get("message_received")!;
+    const spawned = typedHooks.get("subagent_spawned")!;
+
+    // Parent turn establishes an active context + root span.
+    messageReceived({ sessionKey: "parent-sess", text: "hi" }, {});
+    const parentRoot = spans.find(
+      (s) => s.spanName === "openclaw.request" && s.attrs["openclaw.session.key"] === "parent-sess",
+    )!;
+    expect(parentRoot).toBeDefined();
+
+    // Parent spawns a child — links child→parent and stashes the spawn span.
+    spawned(
+      { runId: "run-1", childSessionKey: "child-sess", agentId: "c", label: "c" },
+      { sessionKey: "parent-sess" },
+    );
+    const spawnSpan = spans.find((s) => s.spanName === "openclaw.subagent.spawning")!;
+    expect(spawnSpan).toBeDefined();
+
+    // Child's first inbound message must JOIN the same trace, nested under
+    // the spawn span — not start a fresh trace root.
+    messageReceived({ sessionKey: "child-sess", text: "work" }, {});
+    const childRoot = spans.find(
+      (s) => s.spanName === "openclaw.request" && s.attrs["openclaw.session.key"] === "child-sess",
+    )!;
+    expect(childRoot).toBeDefined();
+
+    // The child request span was created WITH a parent context...
+    expect(childRoot.parentContext).toBeDefined();
+    // ...resolving to the subagent spawn span (shared trace lineage).
+    expect(trace.getSpanContext(childRoot.parentContext as any)?.spanId).toBe(spawnSpan.id);
+
+    // Sanity: the parent request span itself remained a trace root.
+    expect(trace.getSpanContext(parentRoot.parentContext as any)).toBeUndefined();
+
+    stopHooks();
+  });
+
+  it("re-parents the child openclaw.request from an incoming W3C traceparent when present", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const messageReceived = typedHooks.get("message_received")!;
+
+    // Cross-process ingress: message carries a W3C traceparent.
+    const traceparent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+    messageReceived(
+      { sessionKey: "ingress-sess", text: "hi", metadata: { traceparent } },
+      {},
+    );
+    const root = spans.find(
+      (s) => s.spanName === "openclaw.request" && s.attrs["openclaw.session.key"] === "ingress-sess",
+    )!;
+    expect(root).toBeDefined();
+    // Parented into the incoming trace (not a fresh root).
+    expect(trace.getSpanContext(root.parentContext as any)?.traceId).toBe(
+      "0af7651916cd43dd8448eb211c80319c",
+    );
 
     stopHooks();
   });
