@@ -93,6 +93,20 @@ export class TraceContextStore {
   private activeRequestKey = new Map<string, string>();
   private activeTurnKey = new Map<string, string>();
 
+  // ── Retained recent request contexts (ISI-1653) ───────────────────
+  // Trailing lifecycle events — an outbound `message_sent` (channel
+  // delivery) or a late `cron_changed` — frequently fire AFTER `agent_end`
+  // has already run `cleanupSession`, so the live activeContext is gone and
+  // the span would start a fresh root, orphaning into its own single-span
+  // trace. We retain the just-ended request's root Context briefly, keyed by
+  // sessionKey, so those trailing spans still nest into the SAME trace as the
+  // request they belong to. Bounded by size + TTL: the size cap prevents
+  // unbounded growth, and the TTL prevents a much-later event from being
+  // cross-linked into a stale, unrelated trace.
+  private recentRequests = new Map<string, { rootContext: Context; retainedAt: number }>();
+  private static readonly RECENT_MAX = 256;
+  private static readonly RECENT_TTL_MS = 60_000;
+
   // ── Gateway ───────────────────────────────────────────────────────
 
   setGateway(ctx: GatewayContext): void {
@@ -288,6 +302,39 @@ export class TraceContextStore {
     return undefined;
   }
 
+  // ── Retained recent request context (ISI-1653) ────────────────────
+
+  /**
+   * Retain a request's root Context after it ends so a trailing lifecycle
+   * event (outbound `message_sent`, late `cron_changed`) that fires after
+   * teardown can still nest into the same trace. Evicts the oldest entry
+   * when the size cap is reached (the Map is insertion-ordered).
+   */
+  retainRecentRequest(sessionKey: string, rootContext: Context): void {
+    // Re-insert to move this key to the newest position.
+    this.recentRequests.delete(sessionKey);
+    if (this.recentRequests.size >= TraceContextStore.RECENT_MAX) {
+      const oldest = this.recentRequests.keys().next().value;
+      if (oldest !== undefined) this.recentRequests.delete(oldest);
+    }
+    this.recentRequests.set(sessionKey, { rootContext, retainedAt: Date.now() });
+  }
+
+  /**
+   * Return the retained root Context for a recently-ended request, or
+   * undefined when none exists or the retained entry has aged past the TTL
+   * (in which case it is evicted so it can never parent a stale trace).
+   */
+  getRecentRequestContext(sessionKey: string): Context | undefined {
+    const retained = this.recentRequests.get(sessionKey);
+    if (!retained) return undefined;
+    if (Date.now() - retained.retainedAt > TraceContextStore.RECENT_TTL_MS) {
+      this.recentRequests.delete(sessionKey);
+      return undefined;
+    }
+    return retained.rootContext;
+  }
+
   resolveParentContext(sessionKey: string): Context | undefined {
     const parentKey = this.subAgentLinks.get(sessionKey);
     if (!parentKey) return undefined;
@@ -324,6 +371,15 @@ export class TraceContextStore {
   cleanupSession(sessionKey: string): void {
     const rk = this.activeRequestKey.get(sessionKey);
     const tk = this.activeTurnKey.get(sessionKey);
+
+    // ISI-1653: retain the request's root trace briefly BEFORE teardown so a
+    // trailing `message_sent` / `cron_changed` still nests into this trace
+    // instead of orphaning. Prefer the request tier, fall back to the legacy
+    // activeContext root.
+    const retainRoot =
+      (rk ? this.requests.get(rk)?.rootContext : undefined) ??
+      this.activeContexts.get(sessionKey)?.rootContext;
+    if (retainRoot) this.retainRecentRequest(sessionKey, retainRoot);
 
     if (tk) {
       const turn = this.agentTurns.get(tk);
@@ -428,6 +484,7 @@ export class TraceContextStore {
     this.subAgentLinks.clear();
     this.activeRequestKey.clear();
     this.activeTurnKey.clear();
+    this.recentRequests.clear();
   }
 
   // ── Diagnostics ───────────────────────────────────────────────────

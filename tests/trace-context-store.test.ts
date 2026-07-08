@@ -485,4 +485,53 @@ describe("TraceContextStore", () => {
       expect(stats.subAgentLinks).toBe(1);
     });
   });
+
+  describe("retained recent request context (ISI-1653)", () => {
+    it("returns a retained root context within the TTL window", () => {
+      const ctx = createContextSpy();
+      store.retainRecentRequest("s1", ctx);
+      expect(store.getRecentRequestContext("s1")).toBe(ctx);
+    });
+
+    it("returns undefined for a session with nothing retained", () => {
+      expect(store.getRecentRequestContext("missing")).toBeUndefined();
+    });
+
+    it("evicts and returns undefined once the entry ages past the TTL", () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(0);
+        const ctx = createContextSpy();
+        store.retainRecentRequest("s1", ctx);
+        // Just inside the 60s TTL — still resolvable.
+        vi.setSystemTime(59_000);
+        expect(store.getRecentRequestContext("s1")).toBe(ctx);
+        // Past the TTL — evicted.
+        vi.setSystemTime(61_000);
+        expect(store.getRecentRequestContext("s1")).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("cleanupSession retains the request root so a trailing event can nest", () => {
+      const rootCtx = createContextSpy();
+      store.setActiveContext("s1", {
+        rootSpan: createSpanSpy("openclaw.request"),
+        rootContext: rootCtx,
+        startTime: Date.now(),
+      });
+      store.cleanupSession("s1");
+      // Live context is gone…
+      expect(store.getActiveContext("s1")).toBeUndefined();
+      // …but the trace is retained for trailing lifecycle spans.
+      expect(store.getRecentRequestContext("s1")).toBe(rootCtx);
+    });
+
+    it("clear() drops retained contexts", () => {
+      store.retainRecentRequest("s1", createContextSpy());
+      store.clear();
+      expect(store.getRecentRequestContext("s1")).toBeUndefined();
+    });
+  });
 });

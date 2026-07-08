@@ -3632,3 +3632,103 @@ describe("compaction spans + metrics (ISI-1628)", () => {
     expect(telemetry.counters.compactionCount.add).not.toHaveBeenCalled();
   });
 });
+
+// ── Lifecycle span re-parenting (ISI-1653) ──────────────────────────────
+// Regression coverage for the "1 request → 3-4 traces" bug: lifecycle event
+// spans (message.sent, cron.changed, dispatch.prepare) must nest into the
+// live request/session trace instead of starting fresh disconnected roots.
+describe("lifecycle span re-parenting (ISI-1653)", () => {
+  let stopHooks: () => void;
+
+  it("message.sent nests into the retained request trace after agent_end tore it down", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const messageReceived = typedHooks.get("message_received")!;
+    const agentEnd = typedHooks.get("agent_end")!;
+    const messageSent = typedHooks.get("message_sent")!;
+
+    // 1) inbound message opens the request root span
+    messageReceived({ sessionKey: "s1", text: "hi" }, {});
+    const rootSpan = spans.find(
+      (s) => s.spanName === "openclaw.request" && s.attrs["openclaw.session.key"] === "s1",
+    )!;
+    expect(rootSpan).toBeDefined();
+
+    // 2) agent_end ends + cleans up the live context (retaining the trace)
+    agentEnd({ sessionKey: "s1", success: true, messages: [] }, { sessionKey: "s1", agentId: "a" });
+
+    // 3) the channel delivers the reply AFTER teardown
+    messageSent({ sessionKey: "s1", channel: "whatsapp", text: "reply" }, {});
+
+    const sent = spans.find((s) => s.spanName === "openclaw.message.sent")!;
+    expect(sent).toBeDefined();
+    // Nested into the SAME trace as the request it answers — not a fresh root.
+    expect(trace.getSpanContext(sent.parentContext as any)?.spanId).toBe(rootSpan.id);
+    expect(sent.attrs["openclaw.trace.parent_source"]).toBe("recent_request");
+
+    stopHooks();
+  });
+
+  it("cron.changed falls back to the live session span when there is no active request", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const sessionStart = typedHooks.get("session_start")!;
+    const cronChanged = typedHooks.get("cron_changed")!;
+
+    sessionStart({ sessionKey: "s2", agentId: "a" }, {});
+    const sessionSpan = spans.find((s) => s.spanName === "openclaw.session")!;
+    expect(sessionSpan).toBeDefined();
+
+    // No request/turn context is live — only the session span exists.
+    cronChanged({ jobName: "nightly", action: "created" }, { sessionKey: "s2" });
+
+    const cronSpan = spans.find((s) => s.spanName === "openclaw.cron.changed")!;
+    expect(cronSpan).toBeDefined();
+    expect(trace.getSpanContext(cronSpan.parentContext as any)?.spanId).toBe(sessionSpan.id);
+    expect(cronSpan.attrs["openclaw.trace.parent_source"]).toBe("session");
+
+    stopHooks();
+  });
+
+  it("message.sent stays a root only when the store holds nothing at all", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    // No prior message_received / session_start for this session.
+    typedHooks.get("message_sent")!({ sessionKey: "cold", channel: "cli", text: "hi" }, {});
+
+    const sent = spans.find((s) => s.spanName === "openclaw.message.sent")!;
+    expect(sent).toBeDefined();
+    expect(trace.getSpanContext(sent.parentContext as any)).toBeUndefined();
+    expect(sent.attrs["openclaw.trace.parent_source"]).toBe("none");
+
+    stopHooks();
+  });
+
+  it("dispatch.prepare still parents to the agent turn span (regression)", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    typedHooks.get("before_model_resolve")!({}, { agentId: "a1", sessionKey: "s3" });
+    const turnSpan = spans.find((s) => s.spanName === "openclaw.agent.turn")!;
+    expect(turnSpan).toBeDefined();
+
+    typedHooks.get("before_dispatch")!(
+      { sessionKey: "s3", model: "gpt-4o", provider: "openai" },
+      { sessionKey: "s3" },
+    );
+
+    const dispatchSpan = spans.find((s) => s.spanName === "openclaw.dispatch.prepare")!;
+    expect(dispatchSpan).toBeDefined();
+    expect(trace.getSpanContext(dispatchSpan.parentContext as any)?.spanId).toBe(turnSpan.id);
+    expect(dispatchSpan.attrs["openclaw.trace.parent_source"]).toBe("agent");
+
+    stopHooks();
+  });
+});

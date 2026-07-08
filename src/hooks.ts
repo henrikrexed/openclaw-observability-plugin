@@ -143,6 +143,57 @@ const store: TraceContextStore =
 (globalThis as any)[GLOBAL_STORE_KEY] = store;
 
 /**
+ * Resolve the best available parent context for a lifecycle-event span
+ * (`message_sent`, `cron_changed`, `before_dispatch`, …) so it nests into the
+ * live request/session trace instead of orphaning into its own single-span
+ * trace (ISI-1653).
+ *
+ * These events do NOT run inside an activated OTel context — the OpenClaw hook
+ * dispatcher never wraps handlers in `context.with(...)` — so `context.active()`
+ * is always the empty root. The ONLY way these spans get a parent is an explicit
+ * store lookup. When that lookup misses (the event fires before the request
+ * context exists, or after `agent_end` tore it down), the span silently becomes
+ * a disconnected root.
+ *
+ * Resolution order, strongest (most specific, live) first:
+ *   1. live active context   — agent-turn span, else request root
+ *   2. tiered legacy resolve — turn/request tiers of the store
+ *   3. retained recent request — the just-ended request's trace, kept briefly
+ *      so a trailing `message_sent` / `cron_changed` firing AFTER `agent_end`
+ *      still lands in that request's trace (see TraceContextStore retention)
+ *   4. live session span     — long-lived per-conversation anchor
+ *   5. gateway span          — process-lifetime anchor (last resort)
+ *
+ * `context` is undefined only when the store holds nothing at all (very early
+ * startup); callers then fall back to `context.active()` and start a root span
+ * exactly as before. `source` is stamped on the span as
+ * `openclaw.trace.parent_source` for diagnosability.
+ */
+function resolveLifecycleParentContext(
+  store: TraceContextStore,
+  sessionKey: string,
+): { context?: Context; source: string } {
+  const active = store.getActiveContext(sessionKey);
+  if (active?.agentContext) return { context: active.agentContext, source: "agent" };
+  if (active?.rootContext) return { context: active.rootContext, source: "request" };
+
+  const legacy = store.resolveLegacyContext(sessionKey);
+  if (legacy?.agentContext) return { context: legacy.agentContext, source: "turn" };
+  if (legacy?.rootContext) return { context: legacy.rootContext, source: "request" };
+
+  const recent = store.getRecentRequestContext(sessionKey);
+  if (recent) return { context: recent, source: "recent_request" };
+
+  const session = store.getSession(sessionKey)?.context;
+  if (session) return { context: session, source: "session" };
+
+  const gateway = store.getGateway()?.context;
+  if (gateway) return { context: gateway, source: "gateway" };
+
+  return { context: undefined, source: "none" };
+}
+
+/**
  * Register all plugin hooks on the OpenClaw plugin API.
  *
  * Hooks are registered during the synchronous `register()` phase using a
@@ -1206,8 +1257,12 @@ export function registerHooks(
         if (!sessionCtx) {
           logger.warn(`[otel] DIAG before_dispatch: NO sessionCtx for sessionKey=${sessionKey}, storeSize=${store.activeContextCount}, eventKeys=${Object.keys(event || {}).join(',')}, ctxKeys=${Object.keys(ctx || {}).join(',')}`);
         }
-        const parentContext =
-          sessionCtx?.agentContext || sessionCtx?.rootContext || context.active();
+        // ISI-1653: resolve a live parent through all store tiers so the
+        // dispatch span never orphans into its own trace when the direct
+        // activeContext lookup misses.
+        const { context: resolvedParent, source: parentSource } =
+          resolveLifecycleParentContext(store, sessionKey);
+        const parentContext = resolvedParent ?? context.active();
 
         const span = tracer.startSpan(
           "openclaw.dispatch.prepare",
@@ -1222,6 +1277,7 @@ export function registerHooks(
               ...codeAttrs("before_dispatch"),
               "openclaw.session.key": sessionKey,
               "openclaw.agent.id": agentId,
+              "openclaw.trace.parent_source": parentSource,
             },
           },
           parentContext
@@ -1722,12 +1778,17 @@ export function registerHooks(
         const charCount =
           typeof messageText === "string" ? messageText.length : 0;
 
-        const sessionCtx = store.getActiveContext(sessionKey);
-        if (!sessionCtx) {
+        // ISI-1653: an outbound `message_sent` fires when the reply is
+        // delivered to the channel, which routinely happens AFTER `agent_end`
+        // has already torn down the live request context. Resolve through all
+        // store tiers — including the retained recent-request trace — so the
+        // reply span nests into the request it answers instead of orphaning.
+        if (!store.getActiveContext(sessionKey)) {
           logger.warn(`[otel] DIAG message_sent: NO sessionCtx for sessionKey=${sessionKey}, storeSize=${store.activeContextCount}, eventKeys=${Object.keys(event || {}).join(',')}, ctxKeys=${Object.keys(ctx || {}).join(',')}`);
         }
-        const parentContext =
-          sessionCtx?.rootContext || sessionCtx?.agentContext || context.active();
+        const { context: resolvedParent, source: parentSource } =
+          resolveLifecycleParentContext(store, sessionKey);
+        const parentContext = resolvedParent ?? context.active();
 
         const span = tracer.startSpan(
           "openclaw.message.sent",
@@ -1744,6 +1805,7 @@ export function registerHooks(
               [GEN_AI_CONVERSATION_ID]: sessionKey,
               // code.*
               ...codeAttrs("message_sent"),
+              "openclaw.trace.parent_source": parentSource,
             },
           },
           parentContext
@@ -2736,9 +2798,12 @@ export function registerHooks(
         const sessionKey = ctx?.sessionKey || event?.sessionKey || "unknown";
         const provider = event?.provider || ctx?.provider || "unknown";
 
-        const parentContext = store.getActiveContext(sessionKey)?.agentContext
-          || store.getActiveContext(sessionKey)?.rootContext
-          || context.active();
+        // ISI-1653: nest the cron-change span into the live request/session
+        // trace via all store tiers instead of starting a fresh root when the
+        // direct activeContext lookup misses.
+        const { context: resolvedParent, source: parentSource } =
+          resolveLifecycleParentContext(store, sessionKey);
+        const parentContext = resolvedParent ?? context.active();
 
         const span = tracer.startSpan(
           "openclaw.cron.changed",
@@ -2752,6 +2817,7 @@ export function registerHooks(
               ...codeAttrs("cron_changed"),
               "openclaw.session.key": sessionKey,
               "openclaw.agent.id": agentId,
+              "openclaw.trace.parent_source": parentSource,
             },
           },
           parentContext
