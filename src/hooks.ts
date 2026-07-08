@@ -104,6 +104,13 @@ import {
   OC_CRON_DURATION_MS,
   OC_CRON_SUCCESS,
   OC_CRON_AGENT_ID,
+  OC_COMPACTION_REASON,
+  OC_COMPACTION_MESSAGES_BEFORE,
+  OC_COMPACTION_MESSAGES_AFTER,
+  OC_COMPACTION_TOKENS_BEFORE,
+  OC_COMPACTION_TOKENS_AFTER,
+  OC_COMPACTION_TOKENS_RECLAIMED,
+  OC_COMPACTION_DURATION_MS,
   ATTR_USER_ID,
 } from "./semconv.js";
 
@@ -2103,6 +2110,180 @@ export function registerHooks(
   );
 
   logger.info("[otel] Registered agent_end hook (via api.on)");
+
+  // ── Compaction spans + metrics (ISI-1628 / WS3) ──────────────────
+  // Compaction is a major context/token event that was previously invisible
+  // (neither hook was subscribed). `before_compaction` stashes the start time
+  // + before-state and opens an `openclaw.compaction` span NESTED under the
+  // active session/agent context (never a fresh root) so it appears inside the
+  // end-to-end trace. `after_compaction` closes the span, records deltas, and
+  // emits the count/tokens_reclaimed metrics.
+  //
+  // In-flight state is keyed by sessionKey. The runtime reliably pairs the two
+  // hooks; keying by session bounds any leak to at most one span per session
+  // (a re-entrant before_compaction closes the prior span before replacing it).
+  interface CompactionInFlight {
+    span: Span;
+    startTime: number;
+    messagesBefore?: number;
+    tokensBefore?: number;
+    reason: string;
+  }
+  const compactionInFlight = new Map<string, CompactionInFlight>();
+
+  api.on(
+    "before_compaction",
+    (event: any, ctx: any) => {
+      try {
+        const tel = getTelemetry();
+        if (!tel) return undefined;
+        const { tracer } = tel;
+
+        const sessionKey = ctx?.sessionKey || event?.sessionKey || "unknown";
+        const agentId = ctx?.agentId || event?.agentId || "unknown";
+        // Auto-compaction carries no `reason` field today; read it defensively
+        // so a future runtime that adds one is captured, else default "auto".
+        const reason = event?.reason || "auto";
+        const messagesBefore =
+          typeof event?.messageCount === "number" ? event.messageCount : undefined;
+        const tokensBefore =
+          typeof event?.tokenCount === "number" ? event.tokenCount : undefined;
+
+        // Nest under the active session/agent context so the span lands INSIDE
+        // the end-to-end trace rather than starting a fresh root.
+        const sessionCtx = store.getActiveContext(sessionKey);
+        const parentContext =
+          sessionCtx?.agentContext || sessionCtx?.rootContext || context.active();
+
+        const span = tracer.startSpan(
+          "openclaw.compaction",
+          {
+            kind: SpanKind.INTERNAL,
+            attributes: {
+              [GEN_AI_CONVERSATION_ID]: sessionKey,
+              [GEN_AI_AGENT_ID]: agentId,
+              [OC_COMPACTION_REASON]: reason,
+              ...codeAttrs("before_compaction"),
+              "openclaw.session.key": sessionKey,
+              "openclaw.agent.id": agentId,
+            },
+          },
+          parentContext
+        );
+        if (typeof messagesBefore === "number") {
+          span.setAttribute(OC_COMPACTION_MESSAGES_BEFORE, messagesBefore);
+        }
+        if (typeof tokensBefore === "number") {
+          span.setAttribute(OC_COMPACTION_TOKENS_BEFORE, tokensBefore);
+        }
+
+        // Re-entrant guard: close any prior in-flight compaction span for this
+        // session before replacing it (bounds leaks to one span per session).
+        const prior = compactionInFlight.get(sessionKey);
+        if (prior) {
+          try {
+            prior.span.setStatus({
+              code: SpanStatusCode.OK,
+              message: "superseded by a new before_compaction",
+            });
+            prior.span.end();
+          } catch { /* ignore */ }
+        }
+        compactionInFlight.set(sessionKey, {
+          span,
+          startTime: Date.now(),
+          messagesBefore,
+          tokensBefore,
+          reason,
+        });
+
+        logger.debug?.(
+          `[otel] Compaction started: session=${sessionKey}, messages_before=${messagesBefore ?? "?"}, tokens_before=${tokensBefore ?? "?"}`,
+        );
+      } catch (err) {
+        logger.error?.(
+          `[otel] before_compaction error: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
+      return undefined;
+    },
+    { priority: 60 }
+  );
+
+  logger.info("[otel] Registered before_compaction hook (via api.on)");
+
+  api.on(
+    "after_compaction",
+    (event: any, ctx: any) => {
+      try {
+        const tel = getTelemetry();
+        if (!tel) return undefined;
+        const { counters, histograms } = tel;
+
+        const sessionKey = ctx?.sessionKey || event?.sessionKey || "unknown";
+
+        const inFlight = compactionInFlight.get(sessionKey);
+        if (!inFlight) {
+          // before_compaction never fired (or was already closed) — nothing to
+          // close. Don't emit metrics for a compaction we never opened a span for.
+          return undefined;
+        }
+        compactionInFlight.delete(sessionKey);
+
+        const { span, startTime, tokensBefore, reason } = inFlight;
+
+        const messagesAfter =
+          typeof event?.messageCount === "number" ? event.messageCount : undefined;
+        const tokensAfter =
+          typeof event?.tokenCount === "number" ? event.tokenCount : undefined;
+        const durationMs = Date.now() - startTime;
+
+        if (typeof messagesAfter === "number") {
+          span.setAttribute(OC_COMPACTION_MESSAGES_AFTER, messagesAfter);
+        }
+        if (typeof tokensAfter === "number") {
+          span.setAttribute(OC_COMPACTION_TOKENS_AFTER, tokensAfter);
+        }
+
+        // tokens_reclaimed = before − after, only when both are known. Clamp at
+        // 0 so a runtime that reports a post-summary token bump never emits a
+        // negative reclaim.
+        let tokensReclaimed: number | undefined;
+        if (typeof tokensBefore === "number" && typeof tokensAfter === "number") {
+          tokensReclaimed = Math.max(0, tokensBefore - tokensAfter);
+          span.setAttribute(OC_COMPACTION_TOKENS_RECLAIMED, tokensReclaimed);
+        }
+
+        span.setAttribute(OC_COMPACTION_DURATION_MS, durationMs);
+
+        counters.compactionCount.add(1, {
+          [OC_COMPACTION_REASON]: reason,
+        });
+        if (typeof tokensReclaimed === "number") {
+          histograms.compactionTokensReclaimed.record(tokensReclaimed, {
+            [OC_COMPACTION_REASON]: reason,
+          });
+        }
+
+        span.setStatus({ code: SpanStatusCode.OK });
+        span.end();
+
+        logger.debug?.(
+          `[otel] Compaction ended: session=${sessionKey}, tokens_reclaimed=${tokensReclaimed ?? "?"}, duration=${durationMs}ms`,
+        );
+      } catch (err) {
+        logger.error?.(
+          `[otel] after_compaction error: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
+      return undefined;
+    },
+    { priority: -60 }
+  );
+
+  logger.info("[otel] Registered after_compaction hook (via api.on)");
 
   // ═══════════════════════════════════════════════════════════════════
   // SUB-AGENT ORCHESTRATION HOOKS

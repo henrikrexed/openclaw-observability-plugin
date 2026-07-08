@@ -152,6 +152,7 @@ function createTelemetry(): { telemetry: TelemetryRuntime; spans: Array<Span & S
       cronErrors: noopCounter(),
       subagentSpawns: noopCounter(),
       subagentEnded: noopCounter(),
+      compactionCount: noopCounter(),
     } as unknown as TelemetryRuntime["counters"],
     histograms: {
       agentTurnDuration: noopHistogram(),
@@ -160,6 +161,7 @@ function createTelemetry(): { telemetry: TelemetryRuntime; spans: Array<Span & S
       toolCallDuration: noopHistogram(),
       cronDuration: noopHistogram(),
       subagentDuration: noopHistogram(),
+      compactionTokensReclaimed: noopHistogram(),
     } as unknown as TelemetryRuntime["histograms"],
     gauges: {
       activeSessions: noopUpDownCounter(),
@@ -3424,5 +3426,180 @@ describe("ISI-1004: diagnostics.enrichSpanWithUsage legacy removal (schema 1.3.0
     expect(spy.attrs["gen_ai.usage.input_tokens"]).toBe(100);
     expect(spy.attrs["gen_ai.usage.output_tokens"]).toBe(50);
     expect(spy.attrs["gen_ai.usage.total_tokens"]).toBeUndefined();
+  });
+});
+
+// ── Compaction spans + metrics (ISI-1628 / WS3) ──────────────────────
+
+describe("compaction spans + metrics (ISI-1628)", () => {
+  let stopHooks: () => void;
+
+  afterEach(() => {
+    stopHooks?.();
+  });
+
+  it("registers before_compaction and after_compaction hooks", () => {
+    const { api, typedHooks, logger } = createStubApi();
+    const { telemetry } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    expect(typedHooks.has("before_compaction")).toBe(true);
+    expect(typedHooks.has("after_compaction")).toBe(true);
+    expect(logger.info).toHaveBeenCalledWith(
+      "[otel] Registered before_compaction hook (via api.on)",
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      "[otel] Registered after_compaction hook (via api.on)",
+    );
+  });
+
+  it("before_compaction opens an openclaw.compaction span with before-state, left open", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    // Establish an active context so the compaction span nests under it.
+    typedHooks.get("before_model_resolve")!({}, { agentId: "a", sessionKey: "s" });
+
+    const out = typedHooks.get("before_compaction")!(
+      { messageCount: 120, tokenCount: 90_000 },
+      { agentId: "a", sessionKey: "s" },
+    );
+    expect(out).toBeUndefined();
+
+    const span = spans.find((sp) => sp.spanName === "openclaw.compaction");
+    expect(span).toBeDefined();
+    expect(span!.attrs["openclaw.session.key"]).toBe("s");
+    expect(span!.attrs["openclaw.agent.id"]).toBe("a");
+    expect(span!.attrs["gen_ai.conversation.id"]).toBe("s");
+    expect(span!.attrs["openclaw.compaction.reason"]).toBe("auto");
+    expect(span!.attrs["openclaw.compaction.messages_before"]).toBe(120);
+    expect(span!.attrs["openclaw.compaction.tokens_before"]).toBe(90_000);
+    expect(span!.attrs["code.function.name"]).toBe(
+      "openclaw.otel.hooks.before_compaction",
+    );
+    // Span stays open until after_compaction closes it.
+    expect(span!.ended).toBe(false);
+  });
+
+  it("after_compaction closes the span, records deltas, and emits metrics", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    typedHooks.get("before_model_resolve")!({}, { agentId: "a", sessionKey: "s" });
+    typedHooks.get("before_compaction")!(
+      { messageCount: 120, tokenCount: 90_000 },
+      { agentId: "a", sessionKey: "s" },
+    );
+    const out = typedHooks.get("after_compaction")!(
+      { messageCount: 20, tokenCount: 30_000, compactedCount: 100 },
+      { agentId: "a", sessionKey: "s" },
+    );
+    expect(out).toBeUndefined();
+
+    const span = spans.find((sp) => sp.spanName === "openclaw.compaction")!;
+    expect(span.attrs["openclaw.compaction.messages_after"]).toBe(20);
+    expect(span.attrs["openclaw.compaction.tokens_after"]).toBe(30_000);
+    expect(span.attrs["openclaw.compaction.tokens_reclaimed"]).toBe(60_000);
+    expect(span.attrs["openclaw.compaction.duration_ms"]).toEqual(expect.any(Number));
+    expect(span.ended).toBe(true);
+
+    expect(telemetry.counters.compactionCount.add).toHaveBeenCalledWith(1, {
+      "openclaw.compaction.reason": "auto",
+    });
+    expect(telemetry.histograms.compactionTokensReclaimed.record).toHaveBeenCalledWith(
+      60_000,
+      { "openclaw.compaction.reason": "auto" },
+    );
+  });
+
+  it("clamps tokens_reclaimed at 0 when the post-compaction token count grows", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    typedHooks.get("before_model_resolve")!({}, { agentId: "a", sessionKey: "s" });
+    typedHooks.get("before_compaction")!(
+      { messageCount: 10, tokenCount: 1_000 },
+      { agentId: "a", sessionKey: "s" },
+    );
+    typedHooks.get("after_compaction")!(
+      { messageCount: 8, tokenCount: 1_500, compactedCount: 2 },
+      { agentId: "a", sessionKey: "s" },
+    );
+
+    const span = spans.find((sp) => sp.spanName === "openclaw.compaction")!;
+    expect(span.attrs["openclaw.compaction.tokens_reclaimed"]).toBe(0);
+    expect(telemetry.histograms.compactionTokensReclaimed.record).toHaveBeenCalledWith(
+      0,
+      { "openclaw.compaction.reason": "auto" },
+    );
+  });
+
+  it("omits tokens_reclaimed when token counts are absent, but still counts + times", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    typedHooks.get("before_model_resolve")!({}, { agentId: "a", sessionKey: "s" });
+    typedHooks.get("before_compaction")!(
+      { messageCount: 40 },
+      { agentId: "a", sessionKey: "s" },
+    );
+    typedHooks.get("after_compaction")!(
+      { messageCount: 12, compactedCount: 28 },
+      { agentId: "a", sessionKey: "s" },
+    );
+
+    const span = spans.find((sp) => sp.spanName === "openclaw.compaction")!;
+    expect(span.attrs["openclaw.compaction.tokens_reclaimed"]).toBeUndefined();
+    expect(span.attrs["openclaw.compaction.messages_after"]).toBe(12);
+    expect(span.attrs["openclaw.compaction.duration_ms"]).toEqual(expect.any(Number));
+    expect(span.ended).toBe(true);
+
+    expect(telemetry.counters.compactionCount.add).toHaveBeenCalledWith(1, {
+      "openclaw.compaction.reason": "auto",
+    });
+    expect(
+      telemetry.histograms.compactionTokensReclaimed.record,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("after_compaction is a no-op when no before_compaction opened a span", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    const out = typedHooks.get("after_compaction")!(
+      { messageCount: 5, tokenCount: 100, compactedCount: 1 },
+      { agentId: "a", sessionKey: "orphan" },
+    );
+    expect(out).toBeUndefined();
+
+    expect(spans.find((sp) => sp.spanName === "openclaw.compaction")).toBeUndefined();
+    expect(telemetry.counters.compactionCount.add).not.toHaveBeenCalled();
+  });
+
+  it("captures an explicit reason when the runtime supplies one", () => {
+    const { api, typedHooks } = createStubApi();
+    const { telemetry, spans } = createTelemetry();
+    stopHooks = registerHooks(api, () => telemetry, config);
+
+    typedHooks.get("before_model_resolve")!({}, { agentId: "a", sessionKey: "s" });
+    typedHooks.get("before_compaction")!(
+      { messageCount: 120, tokenCount: 90_000, reason: "manual" },
+      { agentId: "a", sessionKey: "s" },
+    );
+    typedHooks.get("after_compaction")!(
+      { messageCount: 20, tokenCount: 30_000, compactedCount: 100 },
+      { agentId: "a", sessionKey: "s" },
+    );
+
+    const span = spans.find((sp) => sp.spanName === "openclaw.compaction")!;
+    expect(span.attrs["openclaw.compaction.reason"]).toBe("manual");
+    expect(telemetry.counters.compactionCount.add).toHaveBeenCalledWith(1, {
+      "openclaw.compaction.reason": "manual",
+    });
   });
 });

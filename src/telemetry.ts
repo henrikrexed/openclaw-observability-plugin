@@ -202,6 +202,8 @@ export interface OtelCounters {
   webhooksProcessed: Counter;
   /** Webhook error events */
   webhooksErrors: Counter;
+  /** Compaction events (attr: reason) — ISI-1628 */
+  compactionCount: Counter;
 }
 
 export interface OtelHistograms {
@@ -243,6 +245,8 @@ export interface OtelHistograms {
   webhookDuration: Histogram;
   /** Webhook payload size in bytes */
   webhookPayloadSize: Histogram;
+  /** Tokens reclaimed by a compaction event — ISI-1628 */
+  compactionTokensReclaimed: Histogram;
 }
 
 export interface OtelGauges {
@@ -575,6 +579,11 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
       description: "Total webhook error events",
       unit: "errors",
     }),
+    // Compaction metrics (ISI-1628)
+    compactionCount: meter.createCounter("openclaw.compaction.count", {
+      description: "Total context-compaction events",
+      unit: "events",
+    }),
   };
 
   const toolDuration = meter.createHistogram("openclaw.tool.duration", {
@@ -657,6 +666,11 @@ export function initTelemetry(config: OtelObservabilityConfig, logger: any): Tel
     webhookPayloadSize: meter.createHistogram("openclaw.webhook.payload_size", {
       description: "Webhook payload size",
       unit: "bytes",
+    }),
+    // Compaction histogram (ISI-1628)
+    compactionTokensReclaimed: meter.createHistogram("openclaw.compaction.tokens_reclaimed", {
+      description: "Tokens reclaimed by a context-compaction event",
+      unit: "{token}",
     }),
   };
 

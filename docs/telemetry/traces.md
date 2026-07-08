@@ -15,6 +15,7 @@ openclaw.request (SERVER span — full message lifecycle)
 │   ├── tool.exec (INTERNAL — 156ms)
 │   ├── tool.Read (INTERNAL — 12ms)
 │   └── tool.web_fetch (INTERNAL — 1200ms)
+├── openclaw.compaction (INTERNAL — if context is compacted)
 └── openclaw.command.new (INTERNAL — if session reset)
 ```
 
@@ -131,6 +132,33 @@ Azure/OpenAI content-filter payloads returned on the model response are
 emitted — when gated on — as `gen_ai.prompt.prompt_filter_results` (behind
 `captureContent.inputMessages`) and `gen_ai.completion.content_filter_results`
 (behind `captureContent.outputMessages`), JSON-encoded and redacted.
+
+## Compaction Span
+
+Created when the runtime compacts session context (a major context/token
+event). The span is opened by `before_compaction` and closed by
+`after_compaction`, and is **nested under the active session/agent context**
+so it appears inside the end-to-end trace rather than as a separate root.
+
+| | |
+|---|---|
+| **Span Name** | `openclaw.compaction` |
+| **Kind** | INTERNAL |
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `openclaw.compaction.reason` | string | Why compaction ran (auto-compaction reports `"auto"`) |
+| `openclaw.compaction.messages_before` | int | Session message count before compaction |
+| `openclaw.compaction.messages_after` | int | Session message count after compaction |
+| `openclaw.compaction.tokens_before` | int | Token count before compaction (when reported) |
+| `openclaw.compaction.tokens_after` | int | Token count after compaction (when reported) |
+| `openclaw.compaction.tokens_reclaimed` | int | `tokens_before − tokens_after`, clamped at 0 (when both known) |
+| `openclaw.compaction.duration_ms` | int | Compaction duration in milliseconds |
+| `openclaw.session.key` | string | Session identifier |
+| `openclaw.agent.id` | string | Agent identifier |
+
+Emits the `openclaw.compaction.count` counter and
+`openclaw.compaction.tokens_reclaimed` histogram (see the Metrics Reference).
 
 ## Command Spans
 
