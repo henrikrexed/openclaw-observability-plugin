@@ -4,6 +4,17 @@ All notable changes to the `@henrikrexed/openclaw-otel-observability` plugin are
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.9.0...v0.9.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* detect plugin management argv sequence ([fd46dbb](https://github.com/henrikrexed/openclaw-observability-plugin/commit/fd46dbb5e3a687bbb628093147bc99c4ca0f5be1))
+* **ISI-1710:** add compiled dist output + runtimeExtensions entry; guard telemetry/hooks/diagnostics init under plugin-mgmt CLI context ([bd65052](https://github.com/henrikrexed/openclaw-observability-plugin/commit/bd650523fb409e617cce4b64c5493f06321fb381))
+* **ISI-1710:** gate OTLP log pipeline behind plugin-mgmt guard ([02fb2b3](https://github.com/henrikrexed/openclaw-observability-plugin/commit/02fb2b3f6962c02450c384d6c4cb6eae9d4edfb1))
+* **ISI-1710:** npm packaging (compiled dist + runtimeExtensions) + plugin-mgmt lifecycle guard (GH [#68](https://github.com/henrikrexed/openclaw-observability-plugin/issues/68)) ([4198048](https://github.com/henrikrexed/openclaw-observability-plugin/commit/4198048ea123e23981f7200ad02edeb2e3c39c6d))
+* require exact plugins subcommand argv ([5aee0c1](https://github.com/henrikrexed/openclaw-observability-plugin/commit/5aee0c1f8ee2c663991a55fbd5f1db2e6c278420))
+
 ## [0.9.0](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.8.0...v0.9.0) (2026-07-08)
 
 
