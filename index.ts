@@ -47,23 +47,26 @@ let gatewayStopFinalizationStarted = false;
  */
 function isPluginMgmtContext(): boolean {
   const argv = process.argv.slice(1);
-  const pluginMgmtSubcommands = new Set([
+  const pluginMgmtSubcommands = [
     "install",
     "inspect",
     "doctor",
     "list",
     "uninstall",
     "update",
-  ]);
+  ] as const;
+  const pluginMgmtSubcommandSet = new Set<string>(pluginMgmtSubcommands);
 
   return argv.some((arg, index) => {
     const normalizedArg = arg.toLowerCase();
-    if (!normalizedArg.includes("plugins")) return false;
-
     const nextArg = argv[index + 1]?.toLowerCase();
+    if (normalizedArg === "plugins") {
+      return nextArg !== undefined && pluginMgmtSubcommandSet.has(nextArg);
+    }
+
     return (
-      (nextArg !== undefined && pluginMgmtSubcommands.has(nextArg)) ||
-      Array.from(pluginMgmtSubcommands).some((subcommand) => normalizedArg.includes(subcommand))
+      normalizedArg.includes("plugins") &&
+      pluginMgmtSubcommands.some((subcommand) => normalizedArg.includes(subcommand))
     );
   });
 }
