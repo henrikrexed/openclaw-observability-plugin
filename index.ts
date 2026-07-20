@@ -60,14 +60,9 @@ function isPluginMgmtContext(): boolean {
   return argv.some((arg, index) => {
     const normalizedArg = arg.toLowerCase();
     const nextArg = argv[index + 1]?.toLowerCase();
-    if (normalizedArg === "plugins") {
-      return nextArg !== undefined && pluginMgmtSubcommandSet.has(nextArg);
-    }
-
-    return (
-      normalizedArg.includes("plugins") &&
-      pluginMgmtSubcommands.some((subcommand) => normalizedArg.includes(subcommand))
-    );
+    return normalizedArg === "plugins" &&
+      nextArg !== undefined &&
+      pluginMgmtSubcommandSet.has(nextArg);
   });
 }
 
