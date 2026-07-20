@@ -39,6 +39,33 @@ import { initLogPipeline, bridgeGatewayLogger, type LogPipelineRuntime } from ".
 let gatewayStopFinalizer: (() => Promise<void>) | null = null;
 let gatewayStopFinalizationStarted = false;
 
+/**
+ * Detect whether the current process is running a plugin-management CLI
+ * command (install / inspect / doctor / list / uninstall). These commands
+ * only validate and load the plugin entry point; they must not start
+ * long-lived exporters or background timers, otherwise the CLI never exits.
+ */
+function isPluginMgmtContext(): boolean {
+  const argv = process.argv.slice(1);
+  const pluginMgmtSubcommands = [
+    "install",
+    "inspect",
+    "doctor",
+    "list",
+    "uninstall",
+    "update",
+  ] as const;
+  const pluginMgmtSubcommandSet = new Set<string>(pluginMgmtSubcommands);
+
+  return argv.some((arg, index) => {
+    const normalizedArg = arg.toLowerCase();
+    const nextArg = argv[index + 1]?.toLowerCase();
+    return normalizedArg === "plugins" &&
+      nextArg !== undefined &&
+      pluginMgmtSubcommandSet.has(nextArg);
+  });
+}
+
 // ── Public re-exports ───────────────────────────────────────────────
 // W3C trace context propagation helpers. Available without the plugin
 // register lifecycle so user code (custom RPC, message queues,
@@ -96,13 +123,30 @@ const otelObservabilityPlugin = {
     //     a no-op.
     // registerHooks returns a cleanup fn (clears the stale-session
     // sweeper interval) so service.stop() doesn't leak the timer.
+
+    // ISI-1710: skip long-lived initialization during plugin-management
+    // CLI commands (install/inspect/doctor) so they terminate normally.
+    const pluginMgmt = isPluginMgmtContext();
+    if (pluginMgmt) {
+      logger.info("[otel] Plugin-management context detected — skipping telemetry init");
+    }
+
     try {
-      telemetry = initTelemetry(config, logger);
+      if (!pluginMgmt) {
+        telemetry = initTelemetry(config, logger);
+      }
 
       // ISI-997 — wire the OTLP log pipeline + bridge api.logger calls so
       // every gateway log emitted by this plugin (and anyone holding the
       // same logger reference) is exported as an OTel LogRecord.
-      if (config.logs) {
+      // ISI-1710: gate behind !pluginMgmt — initLogPipeline() starts a
+      // BatchLogRecordProcessor (repeating flush timer + OTLP exporter) and
+      // mutates the global LoggerProvider. Since `logs` defaults to true,
+      // an unguarded pipeline would start long-lived exporter work during
+      // `plugins install/inspect/doctor` (and, under protocol: grpc, keep
+      // the event loop alive so the CLI never exits) — the exact failure
+      // this guard exists to prevent.
+      if (!pluginMgmt && config.logs) {
         logPipeline = initLogPipeline(config, logger);
         if (logPipeline) {
           restoreLogger = bridgeGatewayLogger(logger, logPipeline.emit);
@@ -110,7 +154,13 @@ const otelObservabilityPlugin = {
         }
       }
 
-      stopHooks = registerHooks(api, () => telemetry, config);
+      // ISI-1710: only register hooks in non-plugin-mgmt contexts.
+      // Hooks are snapshotted by OpenClaw at registration time; skipping
+      // them here means the gateway (which does not use plugin-mgmt CLI)
+      // still gets them when it loads the plugin normally.
+      if (!pluginMgmt) {
+        stopHooks = registerHooks(api, () => telemetry, config);
+      }
       // `api.on` does not expose an unsubscribe handle. If a host retains
       // old hook registrations across hot reloads, every registered wrapper
       // shares this module-level guard and dispatches only the latest finalizer.
@@ -119,7 +169,11 @@ const otelObservabilityPlugin = {
         gatewayStopFinalizationStarted = true;
         await gatewayStopFinalizer?.();
       });
-      logger.info("[otel] Telemetry + hooks initialized at register() (runner-compatible)");
+      if (pluginMgmt) {
+        logger.info("[otel] Plugin-management context - hooks skipped, CLI will exit cleanly");
+      } else {
+        logger.info("[otel] Telemetry + hooks initialized at register() (runner-compatible)");
+      }
     } catch (err) {
       logger.error(`[otel] Failed to initialize telemetry at register() time: ${String(err)}`);
     }
@@ -180,11 +234,13 @@ const otelObservabilityPlugin = {
 
     // Subscribe to diagnostic events immediately (not just in start())
     // so we capture gateway health metrics even if start() isn't called.
-    if (telemetry) {
+    // ISI-1710: skip in plugin-mgmt contexts to avoid async work that
+    // prevents CLI exit.
+    if (telemetry && !pluginMgmt) {
       registerDiagnosticsListener(telemetry, logger).then((unsub) => {
         unsubscribeDiagnostics = unsub;
         if (hasDiagnosticsSupport()) {
-          logger.info("[otel] ✅ Integrated with OpenClaw diagnostics (cost tracking enabled)");
+          logger.info("[otel] Integrated with OpenClaw diagnostics (cost tracking enabled)");
         }
       }).catch((err) => {
         logger.error(`[otel] Failed to register diagnostics listener: ${String(err)}`);

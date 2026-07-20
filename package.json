@@ -3,12 +3,18 @@
   "version": "0.9.0",
   "description": "OpenTelemetry observability plugin for OpenClaw — traces, metrics, and logs for your AI agent using OpenLLMetry",
   "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "openclaw": {
     "extensions": [
       "./index.ts"
+    ],
+    "runtimeExtensions": [
+      "./dist/index.js"
     ]
   },
   "files": [
+    "dist/**",
     "index.ts",
     "src/**/*.ts",
     "instrumentation/preload.mjs",
@@ -31,9 +37,11 @@
     "url": "https://github.com/henrikrexed/openclaw-observability-plugin/issues"
   },
   "scripts": {
+    "build": "tsc --project tsconfig.json --declaration --outDir dist",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "test": "node --test instrumentation/*.test.mjs && vitest run"
+    "test": "node --test instrumentation/*.test.mjs && vitest run",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "openclaw",

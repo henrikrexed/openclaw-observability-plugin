@@ -1,10 +1,85 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 describe("plugin service lifecycle", () => {
+  const pluginMgmtSubcommands = ["install", "inspect", "doctor", "list", "uninstall", "update"] as const;
+
   afterEach(() => {
     vi.restoreAllMocks();
     vi.resetModules();
   });
+
+  it.each(pluginMgmtSubcommands)(
+    "skips long-lived init during plugin-management CLI %s",
+    async (subcommand) => {
+      vi.resetModules();
+
+      const originalArgv = [...process.argv];
+      process.argv = [originalArgv[0] ?? "node", originalArgv[1] ?? "openclaw", "plugins", subcommand];
+
+      const initTelemetry = vi.fn();
+      const registerHooks = vi.fn();
+      const registerDiagnosticsListener = vi.fn().mockResolvedValue(() => {});
+      const initLogPipeline = vi.fn(() => null);
+
+      vi.doMock("../src/telemetry.js", () => ({
+        initTelemetry,
+        hasPreloadedOtelSdk: vi.fn(() => false),
+      }));
+      vi.doMock("../src/openllmetry.js", () => ({
+        initOpenLLMetry: vi.fn(),
+      }));
+      vi.doMock("../src/hooks.js", () => ({
+        registerHooks,
+      }));
+      vi.doMock("../src/diagnostics.js", () => ({
+        registerDiagnosticsListener,
+        hasDiagnosticsSupport: vi.fn(() => true),
+      }));
+      vi.doMock("../src/logs.js", () => ({
+        initLogPipeline,
+        bridgeGatewayLogger: vi.fn(),
+      }));
+
+      const api = {
+        logger: {
+          debug: vi.fn(),
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+        },
+        pluginConfig: {
+          endpoint: "http://127.0.0.1:14318",
+          traces: true,
+          metrics: true,
+          // ISI-1710: exercise the real default (logs on) so the guard is
+          // proven to skip the long-lived OTLP log pipeline too, not just
+          // telemetry/hooks.
+          logs: true,
+        },
+        registerGatewayMethod: vi.fn(),
+        registerCli: vi.fn(),
+        registerService: vi.fn(),
+        registerTool: vi.fn(),
+        on: vi.fn(),
+      };
+
+      try {
+        const plugin = (await import("../index.js")).default;
+        plugin.register(api);
+        await Promise.resolve();
+      } finally {
+        process.argv = originalArgv;
+      }
+
+      expect(initTelemetry).not.toHaveBeenCalled();
+      expect(registerHooks).not.toHaveBeenCalled();
+      expect(registerDiagnosticsListener).not.toHaveBeenCalled();
+      expect(initLogPipeline).not.toHaveBeenCalled();
+      expect(api.logger.info).toHaveBeenCalledWith(
+        "[otel] Plugin-management context - hooks skipped, CLI will exit cleanly",
+      );
+    },
+  );
 
   it("stop flushes telemetry without destructively shutting providers down", async () => {
     vi.resetModules();
