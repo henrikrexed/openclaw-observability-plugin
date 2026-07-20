@@ -47,16 +47,25 @@ let gatewayStopFinalizationStarted = false;
  */
 function isPluginMgmtContext(): boolean {
   const argv = process.argv.slice(1);
-  return argv.some(
-    (arg) =>
-      arg.includes("plugins") &&
-      (arg.includes("install") ||
-        arg.includes("inspect") ||
-        arg.includes("doctor") ||
-        arg.includes("list") ||
-        arg.includes("uninstall") ||
-        arg.includes("update"))
-  );
+  const pluginMgmtSubcommands = new Set([
+    "install",
+    "inspect",
+    "doctor",
+    "list",
+    "uninstall",
+    "update",
+  ]);
+
+  return argv.some((arg, index) => {
+    const normalizedArg = arg.toLowerCase();
+    if (!normalizedArg.includes("plugins")) return false;
+
+    const nextArg = argv[index + 1]?.toLowerCase();
+    return (
+      (nextArg !== undefined && pluginMgmtSubcommands.has(nextArg)) ||
+      Array.from(pluginMgmtSubcommands).some((subcommand) => normalizedArg.includes(subcommand))
+    );
+  });
 }
 
 // ── Public re-exports ───────────────────────────────────────────────
