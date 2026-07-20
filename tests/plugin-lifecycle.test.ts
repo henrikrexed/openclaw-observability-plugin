@@ -19,6 +19,7 @@ describe("plugin service lifecycle", () => {
       const initTelemetry = vi.fn();
       const registerHooks = vi.fn();
       const registerDiagnosticsListener = vi.fn().mockResolvedValue(() => {});
+      const initLogPipeline = vi.fn(() => null);
 
       vi.doMock("../src/telemetry.js", () => ({
         initTelemetry,
@@ -35,7 +36,7 @@ describe("plugin service lifecycle", () => {
         hasDiagnosticsSupport: vi.fn(() => true),
       }));
       vi.doMock("../src/logs.js", () => ({
-        initLogPipeline: vi.fn(() => null),
+        initLogPipeline,
         bridgeGatewayLogger: vi.fn(),
       }));
 
@@ -50,7 +51,10 @@ describe("plugin service lifecycle", () => {
           endpoint: "http://127.0.0.1:14318",
           traces: true,
           metrics: true,
-          logs: false,
+          // ISI-1710: exercise the real default (logs on) so the guard is
+          // proven to skip the long-lived OTLP log pipeline too, not just
+          // telemetry/hooks.
+          logs: true,
         },
         registerGatewayMethod: vi.fn(),
         registerCli: vi.fn(),
@@ -70,6 +74,7 @@ describe("plugin service lifecycle", () => {
       expect(initTelemetry).not.toHaveBeenCalled();
       expect(registerHooks).not.toHaveBeenCalled();
       expect(registerDiagnosticsListener).not.toHaveBeenCalled();
+      expect(initLogPipeline).not.toHaveBeenCalled();
       expect(api.logger.info).toHaveBeenCalledWith(
         "[otel] Plugin-management context - hooks skipped, CLI will exit cleanly",
       );

@@ -139,7 +139,14 @@ const otelObservabilityPlugin = {
       // ISI-997 — wire the OTLP log pipeline + bridge api.logger calls so
       // every gateway log emitted by this plugin (and anyone holding the
       // same logger reference) is exported as an OTel LogRecord.
-      if (config.logs) {
+      // ISI-1710: gate behind !pluginMgmt — initLogPipeline() starts a
+      // BatchLogRecordProcessor (repeating flush timer + OTLP exporter) and
+      // mutates the global LoggerProvider. Since `logs` defaults to true,
+      // an unguarded pipeline would start long-lived exporter work during
+      // `plugins install/inspect/doctor` (and, under protocol: grpc, keep
+      // the event loop alive so the CLI never exits) — the exact failure
+      // this guard exists to prevent.
+      if (!pluginMgmt && config.logs) {
         logPipeline = initLogPipeline(config, logger);
         if (logPipeline) {
           restoreLogger = bridgeGatewayLogger(logger, logPipeline.emit);
