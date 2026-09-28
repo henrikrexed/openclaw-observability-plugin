@@ -236,6 +236,37 @@ export function toAnyValue(value: unknown): AnyValue {
   return redactSensitiveText(String(value));
 }
 
+// Exported for unit tests — see tests/logs.test.ts.
+//
+// BUGFIX: the OTel JS API's `LogRecord.timestamp` / `observedTimestamp`
+// fields are typed as `TimeInput = HrTime | number | Date`, and per
+// @opentelemetry/core's `timeInputToHrTime()`, a plain `number` is always
+// interpreted as **epoch milliseconds** (matching `Date.now()`) — the SDK
+// performs its own ms -> ns conversion internally during export via
+// `millisToHrTime()`.
+//
+// This code previously pre-multiplied by 1_000_000 before calling `.emit()`,
+// assuming the field wanted epoch nanoseconds directly. That produced an
+// already-nanosecond value (e.g. ~1.79e18 for a 2026 timestamp), which the
+// SDK then treated as epoch *milliseconds* and converted a second time —
+// landing every log record's timestamp roughly 57 million years in the
+// future. Backends that validate timestamp plausibility (e.g. Grafana
+// Loki) silently drop every record with no error surfaced anywhere in the
+// pipeline: the OTLP exporter reports 200 OK, the plugin logs no warning,
+// and the only symptom is log data missing entirely at the query layer.
+//
+// Pass epoch milliseconds straight through; do not scale.
+export function toOtelLogTimestamps(evt: LogEvent): {
+  timestamp: number;
+  observedTimestamp: number;
+} {
+  const timestamp = evt.timestamp || Date.now();
+  return {
+    timestamp: typeof timestamp === "number" ? timestamp : Date.now(),
+    observedTimestamp: Date.now(),
+  };
+}
+
 export function initLogPipeline(
   config: OtelObservabilityConfig,
   logger: any
@@ -305,21 +336,21 @@ export function initLogPipeline(
       // the OTLP LogRecord trace context.
       const logContext = context.active();
 
-      const timestamp = evt.timestamp || Date.now();
-
       // Redact the body before emit. Log bodies can carry copy-pasted
       // tokens, emails, or auth headers; the OTLP exporter will ship
       // them straight to the backend otherwise.
       const rawBody = evt.message || evt.body || "";
       const body = typeof rawBody === "string" ? redactSensitiveText(rawBody) : rawBody;
 
+      const { timestamp, observedTimestamp } = toOtelLogTimestamps(evt);
+
       otelLogger.emit({
         severityNumber,
         severityText,
         body,
         attributes,
-        timestamp: typeof timestamp === "number" ? timestamp * 1_000_000 : timestamp,
-        observedTimestamp: Date.now() * 1_000_000,
+        timestamp,
+        observedTimestamp,
         context: logContext,
       });
     } catch {
