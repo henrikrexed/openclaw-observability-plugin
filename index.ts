@@ -131,6 +131,44 @@ const otelObservabilityPlugin = {
       logger.info("[otel] Plugin-management context detected — skipping telemetry init");
     }
 
+    // ISI-9700: OpenClaw 9.7 regression — some async path produces an
+    // unhandled rejection with reason=undefined.  OpenClaw's own handler
+    // (package-update-activation-recovery.mjs) calls process.exit(1) for any
+    // rejection that is not transient and not already "handled", so a plain
+    // process.on("unhandledRejection", ...) listener fires too late.
+    //
+    // The fix: register into globalThis[Symbol.for("openclaw.unhandledRejection.handlers")]
+    // (the rejectionRegistry Set).  isHandled() queries every entry in that Set
+    // before deciding to crash; returning true here stops the exit.  We log the
+    // suppression so the symptom is observable even though we prevent the crash.
+    const REJECTION_HANDLERS_KEY = Symbol.for("openclaw.unhandledRejection.handlers");
+    let rejectionHandlerCleanup: (() => void) | null = null;
+    if (!pluginMgmt) {
+      const handlers = (globalThis as any)[REJECTION_HANDLERS_KEY];
+      if (handlers instanceof Set) {
+        const undefinedRejectionHandler = (reason: unknown): boolean => {
+          if (reason === undefined) {
+            logger.warn(
+              "[otel] ISI-9700: suppressed unhandled rejection with undefined reason " +
+              "(9.7 regression). Gateway protected from crash — " +
+              "root cause still under investigation."
+            );
+            return true;
+          }
+          return false;
+        };
+        handlers.add(undefinedRejectionHandler);
+        rejectionHandlerCleanup = () => handlers.delete(undefinedRejectionHandler);
+        logger.info("[otel] ISI-9700: registered undefined-rejection guard in rejectionRegistry");
+      } else {
+        logger.warn(
+          "[otel] ISI-9700: rejectionRegistry not found at " +
+          "globalThis[Symbol.for('openclaw.unhandledRejection.handlers')] — " +
+          "crash protection not active (OpenClaw version may have changed the API)"
+        );
+      }
+    }
+
     try {
       if (!pluginMgmt) {
         telemetry = initTelemetry(config, logger);
@@ -315,6 +353,10 @@ const otelObservabilityPlugin = {
       },
 
       stop: async () => {
+        if (rejectionHandlerCleanup) {
+          rejectionHandlerCleanup();
+          rejectionHandlerCleanup = null;
+        }
         if (stopHooks) {
           stopHooks();
           stopHooks = null;
