@@ -311,4 +311,106 @@ describe("plugin service lifecycle", () => {
       (call) => call[0] === "[otel] Telemetry shut down on gateway_stop",
     )).toHaveLength(1);
   });
+
+  it("register() called again without a preceding stop() tears down the previous registration's hooks/diagnostics-listener/log-pipeline first (prevents duplicate model.usage cost/token counting)", async () => {
+    vi.resetModules();
+
+    const stopHooksFirst = vi.fn();
+    const stopHooksSecond = vi.fn();
+    const unsubscribeFirst = vi.fn();
+    const unsubscribeSecond = vi.fn();
+    const restoreLoggerFirst = vi.fn();
+    const restoreLoggerSecond = vi.fn();
+    const logPipelineShutdownFirst = vi.fn().mockResolvedValue(undefined);
+    const logPipelineShutdownSecond = vi.fn().mockResolvedValue(undefined);
+
+    const registerHooks = vi.fn()
+      .mockReturnValueOnce(stopHooksFirst)
+      .mockReturnValueOnce(stopHooksSecond);
+    const registerDiagnosticsListener = vi.fn()
+      .mockResolvedValueOnce(unsubscribeFirst)
+      .mockResolvedValueOnce(unsubscribeSecond);
+    const bridgeGatewayLogger = vi.fn()
+      .mockReturnValueOnce(restoreLoggerFirst)
+      .mockReturnValueOnce(restoreLoggerSecond);
+    const initLogPipeline = vi.fn()
+      .mockReturnValueOnce({ emit: vi.fn(), shutdown: logPipelineShutdownFirst })
+      .mockReturnValueOnce({ emit: vi.fn(), shutdown: logPipelineShutdownSecond });
+
+    vi.doMock("../src/telemetry.js", () => ({
+      initTelemetry: vi.fn(() => ({
+        tracer: {},
+        meter: {},
+        counters: {},
+        histograms: {},
+        gauges: {},
+        flush: vi.fn().mockResolvedValue(undefined),
+        shutdown: vi.fn().mockResolvedValue(undefined),
+      })),
+      hasPreloadedOtelSdk: vi.fn(() => false),
+    }));
+    vi.doMock("../src/openllmetry.js", () => ({
+      initOpenLLMetry: vi.fn(),
+    }));
+    vi.doMock("../src/hooks.js", () => ({
+      registerHooks,
+    }));
+    vi.doMock("../src/diagnostics.js", () => ({
+      registerDiagnosticsListener,
+      hasDiagnosticsSupport: vi.fn(() => true),
+    }));
+    vi.doMock("../src/logs.js", () => ({
+      initLogPipeline,
+      bridgeGatewayLogger,
+    }));
+
+    const api = {
+      logger: {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      },
+      pluginConfig: {
+        endpoint: "http://127.0.0.1:14318",
+        traces: true,
+        metrics: true,
+        logs: true,
+      },
+      registerGatewayMethod: vi.fn(),
+      registerCli: vi.fn(),
+      registerService: vi.fn(),
+      registerTool: vi.fn(),
+      on: vi.fn(),
+    };
+
+    const plugin = (await import("../index.js")).default;
+
+    // First registration — no stop() in between, simulating OpenClaw
+    // calling register() again without the documented stop()→register()
+    // hot-reload sequence (the confirmed trigger behind duplicate
+    // model.usage cost/token events: a single real event fires every
+    // still-attached stacked listener from prior, never-torn-down
+    // registrations).
+    plugin.register(api);
+    await Promise.resolve();
+    plugin.register(api);
+    await Promise.resolve();
+
+    expect(stopHooksFirst).toHaveBeenCalledTimes(1);
+    expect(unsubscribeFirst).toHaveBeenCalledTimes(1);
+    expect(restoreLoggerFirst).toHaveBeenCalledTimes(1);
+    expect(logPipelineShutdownFirst).toHaveBeenCalledTimes(1);
+
+    // The second (current) registration's resources must still be live —
+    // this isn't a general teardown, only the stale previous one's.
+    expect(stopHooksSecond).not.toHaveBeenCalled();
+    expect(unsubscribeSecond).not.toHaveBeenCalled();
+    expect(restoreLoggerSecond).not.toHaveBeenCalled();
+    expect(logPipelineShutdownSecond).not.toHaveBeenCalled();
+
+    expect(api.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("register() called again without a preceding stop()"),
+    );
+  });
 });
