@@ -81,6 +81,147 @@ describe("plugin service lifecycle", () => {
     },
   );
 
+  it("skips long-lived init when api.registrationMode is non-full, even with no distinguishing argv", async () => {
+    // OpenClaw core can load a separate, independent module instance of this
+    // plugin for a read-only "discovery" pass during completely normal
+    // gateway operation — not just via a recognizable one-shot CLI command.
+    // No argv allow-list can ever catch that case; api.registrationMode is
+    // the authoritative signal core sends on every register() call.
+    vi.resetModules();
+
+    const originalArgv = [...process.argv];
+    process.argv = [originalArgv[0] ?? "node", originalArgv[1] ?? "openclaw", "gateway"];
+
+    const initTelemetry = vi.fn();
+    const registerHooks = vi.fn();
+    const registerDiagnosticsListener = vi.fn().mockResolvedValue(() => {});
+    const initLogPipeline = vi.fn(() => null);
+
+    vi.doMock("../src/telemetry.js", () => ({
+      initTelemetry,
+      hasPreloadedOtelSdk: vi.fn(() => false),
+    }));
+    vi.doMock("../src/openllmetry.js", () => ({
+      initOpenLLMetry: vi.fn(),
+    }));
+    vi.doMock("../src/hooks.js", () => ({
+      registerHooks,
+    }));
+    vi.doMock("../src/diagnostics.js", () => ({
+      registerDiagnosticsListener,
+      hasDiagnosticsSupport: vi.fn(() => true),
+    }));
+    vi.doMock("../src/logs.js", () => ({
+      initLogPipeline,
+      bridgeGatewayLogger: vi.fn(),
+    }));
+
+    const api = {
+      logger: {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      },
+      pluginConfig: {
+        endpoint: "http://127.0.0.1:14318",
+        traces: true,
+        metrics: true,
+        logs: true,
+      },
+      registrationMode: "discovery",
+      registerGatewayMethod: vi.fn(),
+      registerCli: vi.fn(),
+      registerService: vi.fn(),
+      registerTool: vi.fn(),
+      on: vi.fn(),
+    };
+
+    try {
+      const plugin = (await import("../index.js")).default;
+      plugin.register(api);
+      await Promise.resolve();
+    } finally {
+      process.argv = originalArgv;
+    }
+
+    expect(initTelemetry).not.toHaveBeenCalled();
+    expect(registerHooks).not.toHaveBeenCalled();
+    expect(registerDiagnosticsListener).not.toHaveBeenCalled();
+    expect(initLogPipeline).not.toHaveBeenCalled();
+  });
+
+  it("initializes normally when api.registrationMode is \"full\", regardless of argv", async () => {
+    vi.resetModules();
+
+    const originalArgv = [...process.argv];
+    process.argv = [originalArgv[0] ?? "node", originalArgv[1] ?? "openclaw", "gateway"];
+
+    const initTelemetry = vi.fn(() => ({
+      tracer: {},
+      meter: {},
+      counters: {},
+      histograms: {},
+      gauges: {},
+      flush: vi.fn().mockResolvedValue(undefined),
+      shutdown: vi.fn().mockResolvedValue(undefined),
+    }));
+    const registerHooks = vi.fn(() => vi.fn());
+    const registerDiagnosticsListener = vi.fn().mockResolvedValue(() => {});
+    const initLogPipeline = vi.fn(() => null);
+
+    vi.doMock("../src/telemetry.js", () => ({
+      initTelemetry,
+      hasPreloadedOtelSdk: vi.fn(() => false),
+    }));
+    vi.doMock("../src/openllmetry.js", () => ({
+      initOpenLLMetry: vi.fn(),
+    }));
+    vi.doMock("../src/hooks.js", () => ({
+      registerHooks,
+    }));
+    vi.doMock("../src/diagnostics.js", () => ({
+      registerDiagnosticsListener,
+      hasDiagnosticsSupport: vi.fn(() => true),
+    }));
+    vi.doMock("../src/logs.js", () => ({
+      initLogPipeline,
+      bridgeGatewayLogger: vi.fn(),
+    }));
+
+    const api = {
+      logger: {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      },
+      pluginConfig: {
+        endpoint: "http://127.0.0.1:14318",
+        traces: true,
+        metrics: true,
+        logs: false,
+      },
+      registrationMode: "full",
+      registerGatewayMethod: vi.fn(),
+      registerCli: vi.fn(),
+      registerService: vi.fn(),
+      registerTool: vi.fn(),
+      on: vi.fn(),
+    };
+
+    try {
+      const plugin = (await import("../index.js")).default;
+      plugin.register(api);
+      await Promise.resolve();
+    } finally {
+      process.argv = originalArgv;
+    }
+
+    expect(initTelemetry).toHaveBeenCalledTimes(1);
+    expect(registerHooks).toHaveBeenCalledTimes(1);
+  });
+
   it("stop flushes telemetry without destructively shutting providers down", async () => {
     vi.resetModules();
 
