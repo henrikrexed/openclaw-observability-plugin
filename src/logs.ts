@@ -448,8 +448,8 @@ function buildLogEvent(level: string, args: unknown[]): LogEvent {
       typeof args[1] === "string" ? args[1] : stringifyArg(first);
     // Spread attrs FIRST so reserved structural fields (level, message,
     // logger, timestamp) below override anything a caller passed in. The
-    // downstream emit() picks these by name and a non-numeric timestamp
-    // would break the `* 1_000_000` math and silently drop the log.
+    // downstream emit()/toOtelLogTimestamps() picks `timestamp` by name;
+    // a non-numeric value falls back to Date.now() rather than failing.
     return {
       ...attrs,
       level,
