@@ -88,10 +88,40 @@ function teardownActiveRegistration(logger: any): void {
 }
 
 /**
+ * Detect whether this register() call is a real, live "full" activation.
+ * OpenClaw core tells every plugin this directly via `api.registrationMode`
+ * (added in OpenClaw v2026.8.1) — the authoritative signal, not an
+ * inference from argv. Only `"full"` is a live activation; every other
+ * value (`"discovery"`, `"tool-discovery"`, `"setup-only"`,
+ * `"setup-runtime"`, `"cli-metadata"`) means this register() call must not
+ * start long-lived exporters or background timers.
+ *
+ * Critically, a non-"full" load can happen with no distinguishing argv at
+ * all — OpenClaw core can load a separate, independent module instance of
+ * this plugin for a read-only "discovery" pass during completely normal
+ * gateway operation, not just via a recognizable one-shot CLI command. No
+ * argv allow-list, however complete, can ever catch that case. See
+ * https://github.com/henrikrexed/openclaw-observability-plugin/issues/78.
+ *
+ * On a host old enough not to send `registrationMode` at all
+ * (pre-v2026.8.1), falls back to the previous argv-based heuristic.
+ */
+function isNonFullRegistration(api: { registrationMode?: string }): boolean {
+  if (api.registrationMode !== undefined) {
+    return api.registrationMode !== "full";
+  }
+  return isPluginMgmtContext();
+}
+
+/**
  * Detect whether the current process is running a plugin-management CLI
  * command (install / inspect / doctor / list / uninstall). These commands
  * only validate and load the plugin entry point; they must not start
  * long-lived exporters or background timers, otherwise the CLI never exits.
+ *
+ * Used only as a fallback for hosts that don't send `api.registrationMode`
+ * (see isNonFullRegistration() above) — on any host that does, this
+ * argv-based heuristic is no longer consulted.
  */
 function isPluginMgmtContext(): boolean {
   const argv = process.argv.slice(1);
@@ -181,9 +211,9 @@ const otelObservabilityPlugin = {
     // registerHooks returns a cleanup fn (clears the stale-session
     // sweeper interval) so service.stop() doesn't leak the timer.
 
-    // ISI-1710: skip long-lived initialization during plugin-management
-    // CLI commands (install/inspect/doctor) so they terminate normally.
-    const pluginMgmt = isPluginMgmtContext();
+    // ISI-1710: skip long-lived initialization unless this is a real, live
+    // "full" registration (see isNonFullRegistration() above).
+    const pluginMgmt = isNonFullRegistration(api);
     if (pluginMgmt) {
       logger.info("[otel] Plugin-management context detected — skipping telemetry init");
     }
