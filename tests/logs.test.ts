@@ -16,6 +16,7 @@ import {
   parseLogConfig,
   shouldExclude,
   toAnyValue,
+  toOtelLogTimestamps,
   type LogEvent,
   type LogPipelineConfig,
 } from "../src/logs.js";
@@ -463,6 +464,58 @@ describe("bridgeGatewayLogger (ISI-997)", () => {
     // The original method (a spy) is invoked, but emit is not.
     expect(emit).toHaveBeenCalledTimes(2);
     expect(original).toHaveBeenCalledWith("post-restore");
+  });
+});
+
+// ─── Regression: log timestamp double-conversion ──────────────────────────
+//
+// The OTel JS API's `TimeInput = HrTime | number | Date` treats a plain
+// `number` as epoch *milliseconds* (@opentelemetry/core timeInputToHrTime ->
+// millisToHrTime), performing its own ms->ns conversion during export.
+// Pre-multiplying by 1_000_000 before calling emit() double-converts the
+// value, landing every log record's timestamp ~57 million years in the
+// future. Ingestion backends that validate timestamp plausibility (e.g.
+// Grafana Loki) then silently drop every record — the OTLP exporter still
+// reports 200 OK, so nothing in the pipeline surfaces an error.
+
+describe("toOtelLogTimestamps (log timestamp double-conversion regression)", () => {
+  it("passes evt.timestamp through unscaled as epoch milliseconds", () => {
+    const nowMs = Date.now();
+    const { timestamp } = toOtelLogTimestamps({ timestamp: nowMs });
+
+    expect(timestamp).toBe(nowMs);
+    // Sanity bound: a correct epoch-ms value for "now" must be within an
+    // hour of Date.now() — catches any reintroduced *1_000_000 (or similar)
+    // scaling, which would land ~10^13-10^15 ms away (millennia off).
+    expect(Math.abs(Date.now() - timestamp)).toBeLessThan(60 * 60 * 1000);
+  });
+
+  it("falls back to Date.now() when evt.timestamp is missing", () => {
+    const before = Date.now();
+    const { timestamp } = toOtelLogTimestamps({});
+    const after = Date.now();
+
+    expect(timestamp).toBeGreaterThanOrEqual(before);
+    expect(timestamp).toBeLessThanOrEqual(after);
+  });
+
+  it("falls back to Date.now() when evt.timestamp is non-numeric", () => {
+    const before = Date.now();
+    // @ts-expect-error - exercising defensive handling of a malformed event
+    const { timestamp } = toOtelLogTimestamps({ timestamp: "not-a-number" });
+    const after = Date.now();
+
+    expect(timestamp).toBeGreaterThanOrEqual(before);
+    expect(timestamp).toBeLessThanOrEqual(after);
+  });
+
+  it("observedTimestamp is always a fresh epoch-milliseconds Date.now(), never scaled", () => {
+    const before = Date.now();
+    const { observedTimestamp } = toOtelLogTimestamps({ timestamp: 12345 });
+    const after = Date.now();
+
+    expect(observedTimestamp).toBeGreaterThanOrEqual(before);
+    expect(observedTimestamp).toBeLessThanOrEqual(after);
   });
 });
 
