@@ -4,6 +4,16 @@ All notable changes to the `@henrikrexed/openclaw-otel-observability` plugin are
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.9.1...v0.9.2) (2026-10-21)
+
+
+### Bug Fixes
+
+* **otel-logs:** stop double-converting log record timestamps to nanoseconds ([057b9c2](https://github.com/henrikrexed/openclaw-observability-plugin/commit/057b9c2b0b784e16f22832d9d47b6eb690a34aa0))
+* **otel-logs:** stop double-converting log record timestamps to nanoseconds ([436b448](https://github.com/henrikrexed/openclaw-observability-plugin/commit/436b448ade2c6279168f3c447b018e082ec939be))
+* tear down previous registration's resources on repeated register() without stop() ([e783e33](https://github.com/henrikrexed/openclaw-observability-plugin/commit/e783e3335e4802599f8afc818c1ce3318a8791f2))
+* tear down previous registration's resources on repeated register() without stop() ([5aad2df](https://github.com/henrikrexed/openclaw-observability-plugin/commit/5aad2df968d2fbaa51d9bb1e8946dcc28f6c87cf))
+
 ## [0.9.1](https://github.com/henrikrexed/openclaw-observability-plugin/compare/v0.9.0...v0.9.1) (2026-07-20)
 
 
