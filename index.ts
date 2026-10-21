@@ -40,6 +40,54 @@ let gatewayStopFinalizer: (() => Promise<void>) | null = null;
 let gatewayStopFinalizationStarted = false;
 
 /**
+ * Tracks the active registration's per-call resources (hooks, the
+ * diagnostics-event subscription, the log pipeline, the gateway-logger
+ * bridge) so a subsequent `register()` call can tear down the PREVIOUS
+ * call's resources before setting up its own. `telemetry` itself doesn't
+ * need tracking here —
+ * `initTelemetry()` already dedupes it via its own module-level
+ * singleton (`initializedRuntime`).
+ *
+ * OpenClaw is expected to call the plugin's `stop()` before calling
+ * `register()` again (config hot-reload) — `stop()` below already tears
+ * these same resources down correctly when that happens. It has been
+ * observed, however, calling `register()` repeatedly WITHOUT an
+ * intervening `stop()`; each such call previously left the prior call's
+ * resources permanently stacked (`api.on`/the diagnostics event source
+ * don't expose per-call replacement — only addition), since they were
+ * only ever torn down by THAT call's own `stop()`, which never ran. A
+ * single real OpenClaw event (e.g. `model.usage`) then fired every
+ * still-attached stacked listener, producing duplicate cost/token
+ * metrics and log lines — confirmed via direct log evidence (exact
+ * duplicate `model.usage` lines, ~1ms apart, identical
+ * session+cost+tokens).
+ */
+let activeRegistration: {
+  stopHooks: (() => void) | null;
+  unsubscribeDiagnostics: (() => void) | null;
+  restoreLogger: (() => void) | null;
+  logPipeline: LogPipelineRuntime | null;
+} | null = null;
+
+function teardownActiveRegistration(logger: any): void {
+  if (!activeRegistration) return;
+  logger.warn(
+    "[otel] register() called again without a preceding stop() — " +
+    "tearing down the previous registration's hooks/diagnostics-listener/" +
+    "log-pipeline before setting up the new one " +
+    "(prevents duplicate model.usage cost/token counting)."
+  );
+  const prev = activeRegistration;
+  activeRegistration = null;
+  prev.stopHooks?.();
+  prev.unsubscribeDiagnostics?.();
+  prev.restoreLogger?.();
+  prev.logPipeline?.shutdown().catch((err) => {
+    logger.error(`[otel] Error shutting down previous log pipeline: ${String(err)}`);
+  });
+}
+
+/**
  * Detect whether the current process is running a plugin-management CLI
  * command (install / inspect / doctor / list / uninstall). These commands
  * only validate and load the plugin entry point; they must not start
@@ -95,6 +143,15 @@ const otelObservabilityPlugin = {
     const logger = api.logger;
     const config = parseConfig(api.pluginConfig, logger);
 
+    teardownActiveRegistration(logger);
+    const thisRegistration: NonNullable<typeof activeRegistration> = {
+      stopHooks: null,
+      unsubscribeDiagnostics: null,
+      restoreLogger: null,
+      logPipeline: null,
+    };
+    activeRegistration = thisRegistration;
+
     let telemetry: TelemetryRuntime | null = null;
     let logPipeline: LogPipelineRuntime | null = null;
     let restoreLogger: (() => void) | null = null;
@@ -148,8 +205,10 @@ const otelObservabilityPlugin = {
       // this guard exists to prevent.
       if (!pluginMgmt && config.logs) {
         logPipeline = initLogPipeline(config, logger);
+        thisRegistration.logPipeline = logPipeline;
         if (logPipeline) {
           restoreLogger = bridgeGatewayLogger(logger, logPipeline.emit);
+          thisRegistration.restoreLogger = restoreLogger;
           logger.info("[otel] Gateway logger bridged to OTel log pipeline");
         }
       }
@@ -160,6 +219,7 @@ const otelObservabilityPlugin = {
       // still gets them when it loads the plugin normally.
       if (!pluginMgmt) {
         stopHooks = registerHooks(api, () => telemetry, config);
+        thisRegistration.stopHooks = stopHooks;
       }
       // `api.on` does not expose an unsubscribe handle. If a host retains
       // old hook registrations across hot reloads, every registered wrapper
@@ -239,6 +299,7 @@ const otelObservabilityPlugin = {
     if (telemetry && !pluginMgmt) {
       registerDiagnosticsListener(telemetry, logger).then((unsub) => {
         unsubscribeDiagnostics = unsub;
+        thisRegistration.unsubscribeDiagnostics = unsub;
         if (hasDiagnosticsSupport()) {
           logger.info("[otel] Integrated with OpenClaw diagnostics (cost tracking enabled)");
         }
@@ -330,6 +391,14 @@ const otelObservabilityPlugin = {
         if (logPipeline) {
           await logPipeline.shutdown();
           logPipeline = null;
+        }
+        // A proper stop() already tore this registration's resources down
+        // cleanly — clear the module-level tracking so the next register()
+        // call's teardownActiveRegistration() finds nothing stale to warn
+        // about (this was a correct stop()→register() hot-reload, not the
+        // buggy repeated-register()-without-stop() case it guards against).
+        if (activeRegistration === thisRegistration) {
+          activeRegistration = null;
         }
         // Flush pending data but do NOT destroy the providers. OC's config
         // hot-reload calls stop() → register() in sequence; a destructive
