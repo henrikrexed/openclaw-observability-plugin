@@ -65,7 +65,7 @@
     "@opentelemetry/exporter-metrics-otlp-http": "^0.300.0",
     "@opentelemetry/exporter-trace-otlp-grpc": "^0.300.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.300.0",
-    "@opentelemetry/resources": "^2.11.0",
+    "@opentelemetry/resources": "^3.0.0",
     "@opentelemetry/sdk-logs": "^3.0.0",
     "@opentelemetry/sdk-metrics": "^2.11.0",
     "@opentelemetry/sdk-node": "^0.300.0",
